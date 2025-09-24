@@ -66,18 +66,33 @@ def load_image(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) -
 
 
 def load_mask(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) -> np.ndarray:
-    """Load mask as binary float32 [0, 1] with validation."""
-    path = Path(path)
+    """
+    Load mask as binary float32 [0, 1] with comprehensive validation and transparency support.
     
+    Handles multiple mask formats:
+    - PNG with alpha channel (transparency)
+    - PNG without alpha channel
+    - Grayscale images
+    - RGB images
+    
+    Args:
+        path: Path to mask file
+        size: Optional (width, height) to resize to
+        
+    Returns:
+        Binary mask as float32 [0, 1] where 1 = foreground, 0 = background
+    """
+    path = Path(path)
+
     # Validate path exists
     if not path.exists():
         raise FileNotFoundError(f"Mask file not found: {path}")
-    
+
     if not path.is_file():
         raise ValueError(f"Path is not a file: {path}")
-    
+
     try:
-        # Load mask with alpha channel support
+        # Load mask with full channel support (including alpha)
         mask = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
         if mask is None:
             raise ValueError(f"Failed to load mask: {path}")
@@ -85,18 +100,28 @@ def load_mask(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) ->
         if mask.size == 0:
             raise ValueError(f"Empty mask loaded: {path}")
         
-        # Handle different mask formats
+        # Handle different mask formats intelligently
         if len(mask.shape) == 3:
-            # RGB or RGBA image
-            if mask.shape[2] == 4:  # RGBA
-                # Use alpha channel as mask
-                mask = mask[:, :, 3]
-            elif mask.shape[2] == 3:  # RGB
-                # Convert to grayscale
-                mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+            # Multi-channel image (RGB or RGBA)
+            if mask.shape[2] == 4:  # RGBA - use alpha channel
+                # Alpha channel: 0 = transparent (background), 255 = opaque (foreground)
+                mask_gray = mask[:, :, 3]
+                # Convert to binary: any non-transparent pixel = foreground
+                binary_mask = (mask_gray > 0).astype(np.float32)
+                
+            elif mask.shape[2] == 3:  # RGB - convert to grayscale
+                mask_gray = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+                # Use threshold: >127 = foreground, <=127 = background
+                binary_mask = (mask_gray > 127).astype(np.float32)
+                
+            else:
+                raise ValueError(f"Unsupported multi-channel format: {mask.shape}")
+                
         elif len(mask.shape) == 2:
-            # Already grayscale
-            pass
+            # Grayscale image
+            # Use threshold: >127 = foreground, <=127 = background
+            binary_mask = (mask > 127).astype(np.float32)
+            
         else:
             raise ValueError(f"Unsupported mask format: {mask.shape}")
         
@@ -109,12 +134,8 @@ def load_mask(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) ->
             if width <= 0 or height <= 0:
                 raise ValueError("Size dimensions must be positive")
 
-            mask = cv2.resize(mask, size, interpolation=cv2.INTER_NEAREST)
-        
-        # Convert to binary float32
-        # Handle transparency: transparent pixels (0 alpha) = background (0)
-        # Non-transparent pixels (>0 alpha) = foreground (1)
-        binary_mask = (mask > 0).astype(np.float32)
+            # Use nearest neighbor for binary masks to preserve sharp edges
+            binary_mask = cv2.resize(binary_mask, size, interpolation=cv2.INTER_NEAREST)
         
         # Log warning for unusual masks (but only occasionally to avoid spam)
         mask_ratio = np.mean(binary_mask)
