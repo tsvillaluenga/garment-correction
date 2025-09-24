@@ -11,7 +11,12 @@ import yaml
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.cuda.amp import GradScaler, autocast
+try:
+    from torch.amp import autocast, GradScaler
+    AMP_DEVICE = 'cuda'
+except ImportError:
+    from torch.cuda.amp import autocast, GradScaler
+    AMP_DEVICE = None
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -103,7 +108,7 @@ def train_epoch(
         optimizer.zero_grad()
         
         if use_amp:
-            with autocast():
+            with autocast(AMP_DEVICE) if AMP_DEVICE else autocast():
                 # Forward pass
                 pred = model.forward_train(on_model_input, still_ref, mask_on, mask_still)
                 
@@ -383,7 +388,10 @@ def main():
     )
     
     # AMP scaler
-    scaler = GradScaler('cuda') if config['train']['amp'] else None
+    if config['train']['amp']:
+        scaler = GradScaler(AMP_DEVICE) if AMP_DEVICE else GradScaler()
+    else:
+        scaler = None
     
     # Checkpoint manager
     checkpoint_manager = CheckpointManager(save_dir)
