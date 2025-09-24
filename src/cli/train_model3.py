@@ -1,0 +1,349 @@
+#!/usr/bin/env python3
+"""
+Training script for Model 3: Segmentation for on-model images.
+"""
+import argparse
+import logging
+import sys
+from pathlib import Path
+import yaml
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
+from torch.cuda.amp import GradScaler, autocast
+
+# Add src to path
+sys.path.append(str(Path(__file__).parent.parent))
+
+from data import GarmentSegDataset, create_dataloader
+from models.seg_unet import create_seg_model
+from losses_metrics import CombinedSegLoss, compute_segmentation_metrics
+from utils import (
+    set_seed, setup_logging, CheckpointManager, AverageMeter,
+    create_optimizer, create_scheduler, ProgressTracker, get_device, print_system_info
+)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train Model 3: Segmentation for on-model images")
+    parser.add_argument("--config", type=str, required=True, help="Path to config file")
+    parser.add_argument("--save_dir", type=str, help="Override save directory from config")
+    parser.add_argument("--resume", type=str, help="Path to checkpoint to resume from")
+    parser.add_argument("--device", type=str, help="Device to use (cuda/cpu)")
+    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    return parser.parse_args()
+
+
+def load_config(config_path: str) -> dict:
+    """Load configuration from YAML file."""
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    return config
+
+
+def create_datasets(config: dict):
+    """Create training and validation datasets."""
+    # Training dataset
+    train_dataset = GarmentSegDataset(
+        data_root=config['data_root'],
+        split='train',
+        img_size=config['img_size'],
+        target_type='on_model',  # Different from model 2
+        augment_params=config.get('augment', {})
+    )
+    
+    # Validation dataset
+    val_dataset = GarmentSegDataset(
+        data_root=config['data_root'],
+        split='val',
+        img_size=config['img_size'],
+        target_type='on_model',  # Different from model 2
+        augment_params=None  # No augmentation for validation
+    )
+    
+    return train_dataset, val_dataset
+
+
+def train_epoch(
+    model: nn.Module,
+    dataloader: DataLoader,
+    criterion: nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scaler: GradScaler,
+    device: torch.device,
+    epoch: int,
+    logger,
+    progress_tracker: ProgressTracker,
+    use_amp: bool = True
+):
+    """Train for one epoch."""
+    model.train()
+    
+    losses = AverageMeter()
+    bce_losses = AverageMeter()
+    dice_losses = AverageMeter()
+    
+    progress_tracker.start_batch(len(dataloader), epoch)
+    
+    for batch_idx, (images, masks) in enumerate(dataloader):
+        images = images.to(device, non_blocking=True)
+        masks = masks.to(device, non_blocking=True)
+        
+        optimizer.zero_grad()
+        
+        if use_amp:
+            with autocast():
+                logits = model(images)
+                loss_dict = criterion(logits, masks)
+                loss = loss_dict['total']
+        else:
+            logits = model(images)
+            loss_dict = criterion(logits, masks)
+            loss = loss_dict['total']
+        
+        # Backward pass
+        if use_amp:
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            loss.backward()
+            optimizer.step()
+        
+        # Update metrics
+        losses.update(loss.item(), images.size(0))
+        bce_losses.update(loss_dict['bce'].item(), images.size(0))
+        dice_losses.update(loss_dict['dice'].item(), images.size(0))
+        
+        # Update progress
+        progress_tracker.update_batch(batch_idx + 1)
+        
+        # Log batch progress
+        if batch_idx % 50 == 0:
+            logger.info(
+                f"Epoch {epoch:03d} [{batch_idx:04d}/{len(dataloader):04d}] "
+                f"Loss: {losses.avg:.4f} BCE: {bce_losses.avg:.4f} Dice: {dice_losses.avg:.4f}"
+            )
+    
+    progress_tracker.finish_epoch()
+    
+    return {
+        'train_loss': losses.avg,
+        'train_bce': bce_losses.avg,
+        'train_dice': dice_losses.avg
+    }
+
+
+def validate_epoch(
+    model: nn.Module,
+    dataloader: DataLoader,
+    criterion: nn.Module,
+    device: torch.device,
+    threshold: float = 0.5
+):
+    """Validate for one epoch."""
+    model.eval()
+    
+    losses = AverageMeter()
+    bce_losses = AverageMeter()
+    dice_losses = AverageMeter()
+    
+    all_metrics = []
+    
+    with torch.no_grad():
+        for images, masks in dataloader:
+            images = images.to(device, non_blocking=True)
+            masks = masks.to(device, non_blocking=True)
+            
+            logits = model(images)
+            loss_dict = criterion(logits, masks)
+            
+            # Update loss metrics
+            losses.update(loss_dict['total'].item(), images.size(0))
+            bce_losses.update(loss_dict['bce'].item(), images.size(0))
+            dice_losses.update(loss_dict['dice'].item(), images.size(0))
+            
+            # Compute segmentation metrics
+            seg_metrics = compute_segmentation_metrics(logits, masks, threshold)
+            all_metrics.append(seg_metrics)
+    
+    # Average metrics across all batches
+    avg_metrics = {}
+    for key in all_metrics[0].keys():
+        avg_metrics[f'val_{key}'] = sum(m[key] for m in all_metrics) / len(all_metrics)
+    
+    avg_metrics.update({
+        'val_loss': losses.avg,
+        'val_bce': bce_losses.avg,
+        'val_dice': dice_losses.avg
+    })
+    
+    return avg_metrics
+
+
+def main():
+    args = parse_args()
+    
+    # Load configuration
+    config = load_config(args.config)
+    
+    # Override save directory if specified
+    if args.save_dir:
+        config['save_dir'] = args.save_dir
+    
+    # Create save directory
+    save_dir = Path(config['save_dir'])
+    save_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Setup logging
+    logger = setup_logging(
+        log_file=save_dir / "train.log",
+        level=logging.DEBUG if args.debug else logging.INFO
+    )
+    
+    # Print system info
+    print_system_info()
+    
+    # Set seed
+    set_seed(config['train']['seed'])
+    logger.info(f"Set random seed to {config['train']['seed']}")
+    
+    # Get device
+    device = get_device() if args.device is None else torch.device(args.device)
+    logger.info(f"Using device: {device}")
+    
+    # Create datasets
+    logger.info("Creating datasets...")
+    train_dataset, val_dataset = create_datasets(config)
+    logger.info(f"Train dataset size: {len(train_dataset)}")
+    logger.info(f"Validation dataset size: {len(val_dataset)}")
+    
+    # Create dataloaders
+    train_loader = create_dataloader(
+        train_dataset,
+        batch_size=config['train']['batch_size'],
+        shuffle=True,
+        num_workers=config['train']['num_workers']
+    )
+    
+    val_loader = create_dataloader(
+        val_dataset,
+        batch_size=config['train']['batch_size'],
+        shuffle=False,
+        num_workers=config['train']['num_workers']
+    )
+    
+    # Create model
+    logger.info("Creating model...")
+    model = create_seg_model(
+        model_type="basic",
+        in_channels=3,
+        base_channels=64,
+        depth=4,
+        dropout=0.1
+    )
+    model.to(device)
+    
+    param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Model parameters: {param_count:,}")
+    
+    # Create loss function
+    criterion = CombinedSegLoss(bce_weight=1.0, dice_weight=1.0)
+    
+    # Create optimizer and scheduler
+    optimizer = create_optimizer(
+        model,
+        optimizer_type="adam",
+        lr=config['train']['lr'],
+        weight_decay=config['train']['weight_decay']
+    )
+    
+    scheduler = create_scheduler(
+        optimizer,
+        scheduler_type="cosine",
+        epochs=config['train']['epochs']
+    )
+    
+    # AMP scaler
+    scaler = GradScaler() if config['train']['amp'] else None
+    
+    # Checkpoint manager
+    checkpoint_manager = CheckpointManager(save_dir)
+    
+    # Progress tracker
+    progress_tracker = ProgressTracker()
+    
+    # Resume from checkpoint if specified
+    start_epoch = 0
+    best_iou = 0.0
+    
+    if args.resume:
+        logger.info(f"Resuming from checkpoint: {args.resume}")
+        checkpoint = checkpoint_manager.load_checkpoint(
+            model, optimizer, scheduler, scaler, args.resume
+        )
+        start_epoch = checkpoint['epoch'] + 1
+        best_iou = checkpoint.get('score', 0.0)
+        logger.info(f"Resumed from epoch {checkpoint['epoch']}, best IoU: {best_iou:.4f}")
+    
+    # Training loop
+    logger.info("Starting training...")
+    progress_tracker.start_epoch(config['train']['epochs'], start_epoch)
+    
+    for epoch in range(start_epoch, config['train']['epochs']):
+        # Train
+        train_metrics = train_epoch(
+            model, train_loader, criterion, optimizer, scaler,
+            device, epoch, logger, progress_tracker, config['train']['amp']
+        )
+        
+        # Validate
+        if epoch % config['val']['every_n_epochs'] == 0:
+            val_metrics = validate_epoch(
+                model, val_loader, criterion, device, config['seg']['threshold']
+            )
+            
+            # Combine metrics
+            all_metrics = {**train_metrics, **val_metrics}
+            
+            # Log metrics
+            progress_tracker.print_metrics_table(all_metrics, f"Epoch {epoch:03d} Results")
+            
+            # Save checkpoint
+            current_iou = val_metrics['val_iou']
+            is_best = current_iou > best_iou
+            
+            if is_best:
+                best_iou = current_iou
+                logger.info(f"New best IoU: {best_iou:.4f}")
+            
+            checkpoint_path = checkpoint_manager.save_checkpoint(
+                model, optimizer, scheduler, scaler, epoch, all_metrics,
+                is_best=is_best, score=current_iou
+            )
+            
+            logger.info(f"Saved checkpoint: {checkpoint_path}")
+        
+        # Update learning rate
+        scheduler.step()
+        
+        # Update epoch progress
+        progress_tracker.start_epoch(config['train']['epochs'], epoch + 1)
+    
+    # Finish training
+    progress_tracker.finish()
+    logger.info("Training completed!")
+    logger.info(f"Best validation IoU: {best_iou:.4f}")
+    
+    # Save final checkpoint
+    final_metrics = validate_epoch(
+        model, val_loader, criterion, device, config['seg']['threshold']
+    )
+    checkpoint_manager.save_checkpoint(
+        model, optimizer, scheduler, scaler, config['train']['epochs'] - 1,
+        final_metrics, is_best=False
+    )
+
+
+if __name__ == "__main__":
+    main()
