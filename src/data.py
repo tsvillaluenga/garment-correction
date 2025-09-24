@@ -77,26 +77,44 @@ def load_mask(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) ->
         raise ValueError(f"Path is not a file: {path}")
     
     try:
-        mask = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
+        # Load mask with alpha channel support
+        mask = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
         if mask is None:
             raise ValueError(f"Failed to load mask: {path}")
         
         if mask.size == 0:
             raise ValueError(f"Empty mask loaded: {path}")
         
+        # Handle different mask formats
+        if len(mask.shape) == 3:
+            # RGB or RGBA image
+            if mask.shape[2] == 4:  # RGBA
+                # Use alpha channel as mask
+                mask = mask[:, :, 3]
+            elif mask.shape[2] == 3:  # RGB
+                # Convert to grayscale
+                mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
+        elif len(mask.shape) == 2:
+            # Already grayscale
+            pass
+        else:
+            raise ValueError(f"Unsupported mask format: {mask.shape}")
+        
         # Resize if requested with validation
         if size is not None:
             if not isinstance(size, (tuple, list)) or len(size) != 2:
                 raise ValueError("Size must be (width, height) tuple")
-            
+
             width, height = size
             if width <= 0 or height <= 0:
                 raise ValueError("Size dimensions must be positive")
-            
+
             mask = cv2.resize(mask, size, interpolation=cv2.INTER_NEAREST)
         
         # Convert to binary float32
-        binary_mask = (mask > 127).astype(np.float32)
+        # Handle transparency: transparent pixels (0 alpha) = background (0)
+        # Non-transparent pixels (>0 alpha) = foreground (1)
+        binary_mask = (mask > 0).astype(np.float32)
         
         # Log warning for unusual masks (but only occasionally to avoid spam)
         mask_ratio = np.mean(binary_mask)
