@@ -317,6 +317,7 @@ class ProgressTracker:
         self.progress = None
         self.epoch_task = None
         self.batch_task = None
+        self._epoch_started = False
     
     def start_epoch(self, total_epochs: int, current_epoch: int):
         """Start epoch progress tracking."""
@@ -324,19 +325,24 @@ class ProgressTracker:
             self.progress = Progress(console=self.console)
             self.progress.start()
         
+        # Only create epoch task once
         if self.epoch_task is None:
             self.epoch_task = self.progress.add_task(
                 f"[cyan]Training Progress", 
                 total=total_epochs
             )
         
+        # Update epoch progress
         self.progress.update(self.epoch_task, completed=current_epoch)
+        self._epoch_started = True
     
     def start_batch(self, total_batches: int, epoch: int):
         """Start batch progress tracking."""
+        # Remove previous batch task if exists
         if self.batch_task is not None:
             self.progress.remove_task(self.batch_task)
         
+        # Create new batch task
         self.batch_task = self.progress.add_task(
             f"[green]Epoch {epoch:03d}", 
             total=total_batches
@@ -360,6 +366,7 @@ class ProgressTracker:
             self.progress = None
             self.epoch_task = None
             self.batch_task = None
+            self._epoch_started = False
     
     def print_metrics_table(self, metrics: Dict[str, float], title: str = "Metrics"):
         """Print metrics in a nice table format."""

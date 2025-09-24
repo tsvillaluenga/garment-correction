@@ -335,8 +335,8 @@ def main():
         # Update learning rate
         scheduler.step()
         
-        # Update epoch progress
-        progress_tracker.start_epoch(config['train']['epochs'], epoch + 1)
+        # Update epoch progress (don't call start_epoch again)
+        progress_tracker.progress.update(progress_tracker.epoch_task, completed=epoch + 1)
     
     # Finish training
     progress_tracker.finish()
