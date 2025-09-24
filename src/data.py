@@ -98,12 +98,12 @@ def load_mask(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) ->
         # Convert to binary float32
         binary_mask = (mask > 127).astype(np.float32)
         
-        # Log warning for unusual masks
+        # Log warning for unusual masks (but only occasionally to avoid spam)
         mask_ratio = np.mean(binary_mask)
-        if mask_ratio < 0.001:
+        if mask_ratio < 0.001 and random.random() < 0.01:  # 1% chance to log
             import logging
             logging.warning(f"Very small mask region ({mask_ratio:.3%}) in {path}")
-        elif mask_ratio > 0.999:
+        elif mask_ratio > 0.999 and random.random() < 0.01:  # 1% chance to log
             import logging
             logging.warning(f"Nearly full mask ({mask_ratio:.3%}) in {path}")
         
@@ -352,43 +352,16 @@ class GarmentSegDataset(Dataset):
                 image_tensor = torch.flip(image_tensor, dims=[2])
                 mask_tensor = torch.flip(mask_tensor, dims=[2])
             
-            # Rotation (small angles only)
-            if self.augment_params.get("rotate_deg", 0) > 0:
-                angle = random.uniform(
-                    -self.augment_params["rotate_deg"],
-                    self.augment_params["rotate_deg"]
-                )
-                # Simple rotation using torch transforms would require PIL conversion
-                # For now, skip rotation to keep it simple
-            
-            # Scale (resize and crop)
-            if "scale" in self.augment_params:
-                scale_range = self.augment_params["scale"]
-                scale = random.uniform(scale_range[0], scale_range[1])
-                if scale != 1.0:
-                    new_size = int(self.img_size * scale)
-                    image_tensor = F.interpolate(
-                        image_tensor.unsqueeze(0),
-                        size=(new_size, new_size),
-                        mode="bilinear",
-                        align_corners=False
-                    ).squeeze(0)
-                    mask_tensor = F.interpolate(
-                        mask_tensor.unsqueeze(0),
-                        size=(new_size, new_size),
-                        mode="nearest"
-                    ).squeeze(0)
-                    
-                    # Center crop back to original size
-                    if new_size > self.img_size:
-                        start = (new_size - self.img_size) // 2
-                        image_tensor = image_tensor[:, start:start+self.img_size, start:start+self.img_size]
-                        mask_tensor = mask_tensor[:, start:start+self.img_size, start:start+self.img_size]
-                    elif new_size < self.img_size:
-                        # Pad to original size
-                        pad = (self.img_size - new_size) // 2
-                        image_tensor = F.pad(image_tensor, (pad, pad, pad, pad))
-                        mask_tensor = F.pad(mask_tensor, (pad, pad, pad, pad))
+            # Note: More complex augmentations (rotation, scale) are disabled 
+            # to avoid tensor size mismatches in DataLoader batching
+        
+        # Ensure tensors are contiguous and have correct size
+        image_tensor = image_tensor.contiguous()
+        mask_tensor = mask_tensor.contiguous()
+        
+        # Double-check tensor shapes
+        assert image_tensor.shape == (3, self.img_size, self.img_size), f"Image tensor shape mismatch: {image_tensor.shape}"
+        assert mask_tensor.shape == (1, self.img_size, self.img_size), f"Mask tensor shape mismatch: {mask_tensor.shape}"
         
         return image_tensor, mask_tensor
 

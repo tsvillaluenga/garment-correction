@@ -265,7 +265,7 @@ def main():
     )
     
     # AMP scaler
-    scaler = GradScaler() if config['train']['amp'] else None
+    scaler = GradScaler('cuda') if config['train']['amp'] else None
     
     # Checkpoint manager
     checkpoint_manager = CheckpointManager(save_dir)
