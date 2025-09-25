@@ -11,7 +11,7 @@ train:
 scheduler:
   type: "cosine_annealing"  # Options: cosine_annealing, step, exponential, reduce_on_plateau
   # For cosine_annealing
-  T_max: 80  # Total epochs
+  T_max: 100  # Total epochs
   eta_min: 0.00001  # Minimum LR
   # For step scheduler
   step_size: 20

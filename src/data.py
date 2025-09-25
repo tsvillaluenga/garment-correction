@@ -167,13 +167,17 @@ def apply_light_degradation(
     Args:
         image: RGB image [0, 1] shape (H, W, 3)
         mask: Binary mask [0, 1] shape (H, W)
-        mode: 'hsv', 'lab', or 'rgb'
+        mode: 'hsv', 'lab', 'rgb', or enhanced modes like 'mixed'
         magnitude: Degradation strength
         seed: Random seed for reproducibility
         
     Returns:
         Degraded image with same shape as input
     """
+    # For enhanced modes, use the enhanced degradation function
+    if mode in ["mixed"]:
+        return apply_enhanced_degradation(image, mask, mode, magnitude, seed)
+    
     if seed is not None:
         np.random.seed(seed)
     
@@ -222,7 +226,7 @@ def apply_light_degradation(
             degraded[mask_bool, c] = np.clip(degraded[mask_bool, c] + offset, 0, 1)
     
     else:
-        raise ValueError(f"Unknown degradation mode: {mode}")
+        raise ValueError(f"Unknown degradation mode: {mode}. Available: hsv, lab, rgb, mixed")
     
     return np.clip(degraded, 0, 1)
 
