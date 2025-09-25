@@ -347,10 +347,7 @@ class ProgressTracker:
             # Create custom progress bar with thicker bar and percentage
             self.progress = Progress(
                 TextColumn("[bold white]Training Progress", justify="left"),
-                BarColumn(bar_width=40, style="white", complete_style="bright_green"),
-                BarColumn(bar_width=40, style="white", complete_style="bright_green"),
-                BarColumn(bar_width=40, style="white", complete_style="bright_green"),
-                BarColumn(bar_width=40, style="white", complete_style="bright_green"),
+                ThickBarColumn(bar_width=40, bar_height=3, style="white", complete_style="bright_green"),
                 PercentageColumn(),
                 TextColumn("•"),
                 MofNCompleteColumn(),
