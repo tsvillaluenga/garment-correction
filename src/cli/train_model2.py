@@ -298,6 +298,9 @@ def main():
     
     # Training loop
     logger.info("Starting training...")
+    logger.info(f"Total epochs configured: {config['train']['epochs']}")
+    logger.info(f"Starting from epoch: {start_epoch}")
+    logger.info(f"Will train epochs: {start_epoch} to {config['train']['epochs'] - 1}")
     progress_tracker.start_epoch(config['train']['epochs'], start_epoch)
     
     for epoch in range(start_epoch, config['train']['epochs']):
