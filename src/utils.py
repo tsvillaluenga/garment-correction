@@ -18,6 +18,7 @@ from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedCo
 from rich.logging import RichHandler
 from rich.text import Text
 import time
+from datetime import datetime
 
 
 class PercentageColumn(TextColumn):
@@ -634,6 +635,63 @@ class TrainingHistory:
             json.dump(history_data, f, indent=2)
         
         print(f"Training history saved: {save_path}")
+
+
+def create_timestamped_dir(base_dir: Path, prefix: str = "") -> Path:
+    """
+    Create a timestamped directory for saving training results.
+    
+    Args:
+        base_dir: Base directory (e.g., runs/model1_recolor)
+        prefix: Optional prefix for the timestamp folder
+        
+    Returns:
+        Path to the timestamped directory
+    """
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if prefix:
+        folder_name = f"{prefix}_{timestamp}"
+    else:
+        folder_name = timestamp
+    
+    timestamped_dir = base_dir / folder_name
+    timestamped_dir.mkdir(parents=True, exist_ok=True)
+    
+    return timestamped_dir
+
+
+def save_config_file(config: dict, save_path: Path, model_name: str = ""):
+    """
+    Save training configuration to a text file.
+    
+    Args:
+        config: Configuration dictionary
+        save_path: Path to save the config file
+        model_name: Name of the model for the header
+    """
+    import yaml
+    
+    with open(save_path, 'w') as f:
+        f.write("="*60 + "\n")
+        f.write(f"TRAINING CONFIGURATION - {model_name.upper()}\n")
+        f.write("="*60 + "\n")
+        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write("="*60 + "\n\n")
+        
+        # Write configuration in YAML format
+        yaml.dump(config, f, default_flow_style=False, indent=2)
+        
+        f.write("\n" + "="*60 + "\n")
+        f.write("SYSTEM INFORMATION\n")
+        f.write("="*60 + "\n")
+        f.write(f"PyTorch Version: {torch.__version__}\n")
+        f.write(f"CUDA Available: {torch.cuda.is_available()}\n")
+        if torch.cuda.is_available():
+            f.write(f"CUDA Version: {torch.version.cuda}\n")
+            f.write(f"GPU Count: {torch.cuda.device_count()}\n")
+            if torch.cuda.device_count() > 0:
+                f.write(f"GPU Name: {torch.cuda.get_device_name(0)}\n")
+        f.write("="*60 + "\n")
 
 
 def get_device() -> torch.device:

@@ -27,7 +27,7 @@ from losses_metrics import CombinedRecolorLoss, compute_color_metrics
 from utils import (
     set_seed, setup_logging, CheckpointManager, AverageMeter,
     create_optimizer, create_scheduler, ProgressTracker, get_device, print_system_info,
-    TrainingHistory
+    TrainingHistory, create_timestamped_dir, save_config_file
 )
 
 
@@ -303,9 +303,13 @@ def main():
     if args.save_dir:
         config['save_dir'] = args.save_dir
     
-    # Create save directory
-    save_dir = Path(config['save_dir'])
-    save_dir.mkdir(parents=True, exist_ok=True)
+    # Create timestamped save directory
+    base_save_dir = Path(config['save_dir'])
+    save_dir = create_timestamped_dir(base_save_dir, "train")
+    
+    # Save configuration file
+    config_save_path = save_dir / "training_config.txt"
+    save_config_file(config, config_save_path, "Model 1 - Recoloring")
     
     # Setup logging
     logger = setup_logging(
