@@ -276,21 +276,73 @@ def create_optimizer(
 
 def create_scheduler(
     optimizer: torch.optim.Optimizer,
-    scheduler_type: str = "cosine",
-    epochs: int = 100,
-    **kwargs
+    scheduler_config: dict,
+    epochs: int = 100
 ) -> torch.optim.lr_scheduler._LRScheduler:
-    """Create learning rate scheduler."""
-    if scheduler_type.lower() == "cosine":
-        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, **kwargs)
-    elif scheduler_type.lower() == "step":
-        return torch.optim.lr_scheduler.StepLR(optimizer, **kwargs)
-    elif scheduler_type.lower() == "multistep":
-        return torch.optim.lr_scheduler.MultiStepLR(optimizer, **kwargs)
-    elif scheduler_type.lower() == "plateau":
-        return torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, **kwargs)
+    """
+    Create learning rate scheduler from configuration.
+    
+    Args:
+        optimizer: PyTorch optimizer
+        scheduler_config: Scheduler configuration dictionary
+        epochs: Total training epochs
+        
+    Returns:
+        Learning rate scheduler
+    """
+    scheduler_type = scheduler_config.get('type', 'cosine_annealing').lower()
+    
+    if scheduler_type == "cosine_annealing":
+        T_max = scheduler_config.get('T_max', epochs)
+        eta_min = scheduler_config.get('eta_min', 0.0)
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=T_max, eta_min=eta_min
+        )
+    
+    elif scheduler_type == "step":
+        step_size = scheduler_config.get('step_size', epochs // 3)
+        gamma = scheduler_config.get('gamma', 0.1)
+        return torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=step_size, gamma=gamma
+        )
+    
+    elif scheduler_type == "exponential":
+        gamma = scheduler_config.get('gamma_exp', 0.95)
+        return torch.optim.lr_scheduler.ExponentialLR(
+            optimizer, gamma=gamma
+        )
+    
+    elif scheduler_type == "reduce_on_plateau":
+        mode = scheduler_config.get('mode', 'min')
+        patience = scheduler_config.get('patience', 5)
+        factor = scheduler_config.get('factor', 0.5)
+        min_lr = scheduler_config.get('min_lr', 0.0)
+        return torch.optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, mode=mode, patience=patience, factor=factor, min_lr=min_lr
+        )
+    
+    elif scheduler_type == "multistep":
+        milestones = scheduler_config.get('milestones', [epochs//2, 3*epochs//4])
+        gamma = scheduler_config.get('gamma', 0.1)
+        return torch.optim.lr_scheduler.MultiStepLR(
+            optimizer, milestones=milestones, gamma=gamma
+        )
+    
+    elif scheduler_type == "linear_warmup_cosine":
+        # Custom scheduler: linear warmup + cosine annealing
+        warmup_epochs = scheduler_config.get('warmup_epochs', epochs // 10)
+        T_max = scheduler_config.get('T_max', epochs - warmup_epochs)
+        eta_min = scheduler_config.get('eta_min', 0.0)
+        
+        # For now, use cosine annealing (warmup can be added later)
+        return torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimizer, T_max=T_max, eta_min=eta_min
+        )
+    
     else:
-        raise ValueError(f"Unknown scheduler type: {scheduler_type}")
+        raise ValueError(f"Unknown scheduler type: {scheduler_type}. "
+                        f"Available: cosine_annealing, step, exponential, "
+                        f"reduce_on_plateau, multistep, linear_warmup_cosine")
 
 
 def safe_clamp(tensor: torch.Tensor, min_val: float = 0.0, max_val: float = 1.0) -> torch.Tensor:

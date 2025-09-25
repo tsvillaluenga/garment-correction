@@ -267,9 +267,10 @@ def main():
         weight_decay=config['train']['weight_decay']
     )
     
+    scheduler_config = config.get('scheduler', {'type': 'cosine_annealing'})
     scheduler = create_scheduler(
         optimizer,
-        scheduler_type="cosine",
+        scheduler_config,
         epochs=config['train']['epochs']
     )
     
@@ -347,7 +348,15 @@ def main():
             progress_tracker.print_checkpoint_saved(checkpoint_path.split('/')[-1])
         
         # Update learning rate
-        scheduler.step()
+        scheduler_type = scheduler_config.get('type', 'cosine_annealing').lower()
+        if scheduler_type == "reduce_on_plateau":
+            scheduler.step(1.0 - current_iou)  # Pass (1 - IoU) as loss metric for plateau scheduler
+        else:
+            scheduler.step()  # Regular step for other schedulers
+        
+        # Log current learning rate
+        current_lr = optimizer.param_groups[0]['lr']
+        progress_tracker.print_info(f"📈 Learning Rate: {current_lr:.2e}", "dim white")
         
         # Update epoch progress
         progress_tracker.finish_epoch()

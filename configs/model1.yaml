@@ -3,11 +3,25 @@ img_size: 512
 train:
   batch_size: 4
   epochs: 80
-  lr: 0.00005
+  lr: 0.0002  # Higher initial LR for scheduler
   weight_decay: 0.0001
   amp: true
   num_workers: 4
   seed: 42
+scheduler:
+  type: "cosine_annealing"  # Options: cosine_annealing, step, exponential, reduce_on_plateau
+  # For cosine_annealing
+  T_max: 80  # Total epochs
+  eta_min: 0.00001  # Minimum LR
+  # For step scheduler
+  step_size: 20
+  gamma: 0.5
+  # For exponential
+  gamma_exp: 0.95
+  # For reduce_on_plateau
+  patience: 5
+  factor: 0.5
+  min_lr: 0.00001
 model:
   base_channels: 96
   num_attn_blocks: 3
