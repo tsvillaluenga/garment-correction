@@ -84,10 +84,8 @@ def process_item(
         print(f"Skipping {item_dir.name}: missing files {[f.name for f in missing_files]}")
         return False
     
-    # Create output directory
-    output_dir = save_dir / item_dir.name
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "corrected-on-model.jpg"
+    # Output path (directly in the item directory)
+    output_path = item_dir / "corrected-on-model.jpg"
     
     # Skip if already exists
     if output_path.exists():
