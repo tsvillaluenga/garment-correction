@@ -23,12 +23,15 @@ import time
 class PercentageColumn(TextColumn):
     """Custom percentage column for rich progress."""
     
+    def __init__(self):
+        super().__init__("{task.percentage:>5.1f}%")
+    
     def render(self, task):
         """Render percentage as text."""
         if task.total:
             percent = (task.completed / task.total) * 100
-            return f"{percent:.1f}%"
-        return "0.0%"
+            return f"{percent:>5.1f}%"
+        return "  0.0%"
 
 
 def set_seed(seed: int) -> None:
