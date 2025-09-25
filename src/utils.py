@@ -14,10 +14,21 @@ import matplotlib.pyplot as plt
 import cv2
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn, PercentageColumn
+from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn
 from rich.logging import RichHandler
 from rich.text import Text
 import time
+
+
+class PercentageColumn(TextColumn):
+    """Custom percentage column for rich progress."""
+    
+    def render(self, task):
+        """Render percentage as text."""
+        if task.total:
+            percent = (task.completed / task.total) * 100
+            return f"{percent:.1f}%"
+        return "0.0%"
 
 
 def set_seed(seed: int) -> None:
