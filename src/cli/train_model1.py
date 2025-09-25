@@ -434,8 +434,8 @@ def main():
             # Combine metrics
             all_metrics = {**train_metrics, **val_metrics}
             
-            # Log metrics
-            progress_tracker.print_metrics_table(all_metrics, f"Epoch {epoch:03d} Results")
+            # Print compact epoch results
+            progress_tracker.print_epoch_results(epoch, all_metrics)
             
             # Save checkpoint (lower Delta E is better)
             current_delta_e = val_metrics.get('val_delta_e76_mean', val_metrics['val_delta_e'])
@@ -443,25 +443,25 @@ def main():
             
             if is_best:
                 best_delta_e = current_delta_e
-                logger.info(f"New best Delta E: {best_delta_e:.4f}")
+                progress_tracker.print_best_score(best_delta_e, "Delta E")
             
             checkpoint_path = checkpoint_manager.save_checkpoint(
                 model, optimizer, scheduler, scaler, epoch, all_metrics,
                 is_best=is_best, score=current_delta_e
             )
             
-            logger.info(f"Saved checkpoint: {checkpoint_path}")
+            progress_tracker.print_checkpoint_saved(checkpoint_path.split('/')[-1])
         
         # Update learning rate
         scheduler.step()
         
-        # Update epoch progress (don't call start_epoch again)
-        progress_tracker.progress.update(progress_tracker.epoch_task, completed=epoch + 1)
+        # Update epoch progress
+        progress_tracker.finish_epoch()
     
     # Finish training
     progress_tracker.finish()
-    logger.info("Training completed!")
-    logger.info(f"Best validation Delta E: {best_delta_e:.4f}")
+    progress_tracker.print_info("🎉 Training completed!", "bold green")
+    progress_tracker.print_info(f"🏆 Best validation Delta E: {best_delta_e:.4f}", "bold cyan")
     
     # Save final checkpoint
     final_metrics = validate_epoch(

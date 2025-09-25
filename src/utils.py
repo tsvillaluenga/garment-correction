@@ -14,8 +14,10 @@ import matplotlib.pyplot as plt
 import cv2
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, TaskID
+from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn
 from rich.logging import RichHandler
+from rich.text import Text
+import time
 
 
 def set_seed(seed: int) -> None:
@@ -315,72 +317,131 @@ class ProgressTracker:
     def __init__(self):
         self.console = Console()
         self.progress = None
-        self.epoch_task = None
-        self.batch_task = None
-        self._epoch_started = False
+        self.main_task = None
+        self.current_epoch = 0
+        self.total_epochs = 0
+        self.start_time = None
+        self._last_update_time = 0
     
     def start_epoch(self, total_epochs: int, current_epoch: int):
         """Start epoch progress tracking."""
+        self.total_epochs = total_epochs
+        self.current_epoch = current_epoch
+        
         if self.progress is None:
-            self.progress = Progress(console=self.console)
-            self.progress.start()
-        
-        # Only create epoch task once
-        if self.epoch_task is None:
-            self.epoch_task = self.progress.add_task(
-                f"[cyan]Training Progress", 
-                total=total_epochs
+            # Create custom progress bar with colors similar to the image
+            self.progress = Progress(
+                TextColumn("[bold blue]Training Progress", justify="left"),
+                BarColumn(bar_width=50, style="bright_green", complete_style="bright_green"),
+                MofNCompleteColumn(),
+                TextColumn("•"),
+                TimeElapsedColumn(),
+                TextColumn("•"),
+                TimeRemainingColumn(),
+                console=self.console,
+                refresh_per_second=2
             )
-        
-        # Update epoch progress
-        self.progress.update(self.epoch_task, completed=current_epoch)
-        self._epoch_started = True
+            self.progress.start()
+            self.start_time = time.time()
+            
+            # Create main task
+            self.main_task = self.progress.add_task(
+                "Training", 
+                total=total_epochs,
+                completed=current_epoch
+            )
+        else:
+            # Update existing task
+            self.progress.update(self.main_task, completed=current_epoch)
     
     def start_batch(self, total_batches: int, epoch: int):
         """Start batch progress tracking."""
-        # Remove previous batch task if exists
-        if self.batch_task is not None:
-            self.progress.remove_task(self.batch_task)
-        
-        # Create new batch task
-        self.batch_task = self.progress.add_task(
-            f"[green]Epoch {epoch:03d}", 
-            total=total_batches
-        )
+        self.current_epoch = epoch
+        # We don't create separate batch tasks anymore - just update the main progress
+        pass
     
     def update_batch(self, completed_batches: int):
         """Update batch progress."""
-        if self.batch_task is not None:
-            self.progress.update(self.batch_task, completed=completed_batches)
+        # Limit updates to avoid spam
+        current_time = time.time()
+        if current_time - self._last_update_time > 0.5:  # Update every 0.5 seconds max
+            self._last_update_time = current_time
     
     def finish_epoch(self):
         """Finish epoch progress."""
-        if self.batch_task is not None:
-            self.progress.remove_task(self.batch_task)
-            self.batch_task = None
+        # Update main progress
+        if self.main_task is not None:
+            self.progress.update(self.main_task, completed=self.current_epoch + 1)
     
     def finish(self):
         """Finish all progress tracking."""
         if self.progress is not None:
             self.progress.stop()
             self.progress = None
-            self.epoch_task = None
-            self.batch_task = None
-            self._epoch_started = False
+            self.main_task = None
+    
+    def print_info(self, message: str, style: str = ""):
+        """Print info message below the progress bar."""
+        if style:
+            self.console.print(f"[{style}]{message}[/{style}]")
+        else:
+            self.console.print(message)
+    
+    def print_best_score(self, score: float, score_type: str = "IoU"):
+        """Print new best score with highlighting."""
+        if score_type.lower() in ["iou", "accuracy"]:
+            self.console.print(f"[bold green]🎉 New best {score_type}: {score:.4f}[/bold green]")
+        else:  # For losses (lower is better)
+            self.console.print(f"[bold green]🎉 New best {score_type}: {score:.4f}[/bold green]")
+    
+    def print_checkpoint_saved(self, path: str):
+        """Print checkpoint saved message."""
+        self.console.print(f"[dim]💾 Saved checkpoint: {path}[/dim]")
+    
+    def print_epoch_results(self, epoch: int, metrics: Dict[str, float]):
+        """Print epoch results in a compact format."""
+        # Create a compact metrics display
+        train_loss = metrics.get('train_loss', 0)
+        val_loss = metrics.get('val_loss', 0)
+        
+        # Different metrics for different models
+        if 'val_iou' in metrics:  # Segmentation models
+            main_metric = f"IoU: {metrics['val_iou']:.4f}"
+            color = "bright_cyan"
+        elif 'val_delta_e' in metrics:  # Recoloring model
+            main_metric = f"ΔE: {metrics['val_delta_e']:.4f}"
+            color = "bright_magenta"
+        else:
+            main_metric = f"Loss: {val_loss:.4f}"
+            color = "bright_yellow"
+        
+        # Print compact epoch summary
+        self.console.print(
+            f"[bold white]Epoch {epoch:03d}[/bold white] "
+            f"[dim]│[/dim] "
+            f"[red]Loss: {train_loss:.4f}[/red] "
+            f"[dim]│[/dim] "
+            f"[{color}]{main_metric}[/{color}]"
+        )
     
     def print_metrics_table(self, metrics: Dict[str, float], title: str = "Metrics"):
-        """Print metrics in a nice table format."""
-        table = Table(title=title)
-        table.add_column("Metric", style="cyan")
-        table.add_column("Value", style="magenta")
+        """Print detailed metrics table (used less frequently)."""
+        # Only show this for final results or important milestones
+        table = Table(title=f"[bold]{title}[/bold]", show_header=True, header_style="bold blue")
+        table.add_column("Metric", style="cyan", width=20)
+        table.add_column("Value", style="magenta", justify="right", width=12)
         
-        for key, value in metrics.items():
+        # Sort metrics for better display
+        sorted_metrics = sorted(metrics.items())
+        
+        for key, value in sorted_metrics:
             if isinstance(value, float):
                 table.add_row(key, f"{value:.4f}")
             else:
                 table.add_row(key, str(value))
         
         self.console.print(table)
+        self.console.print()  # Add spacing
 
 
 def count_parameters(model: nn.Module) -> int:
