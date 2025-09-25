@@ -64,9 +64,9 @@ def rgb_to_lab_torch_differentiable(rgb: torch.Tensor, eps: float = 1e-8) -> tor
             t / (3 * delta ** 2) + 4.0 / 29.0
         )
     
-    fx = f_func(xyz_normalized[:, 0:1])
-    fy = f_func(xyz_normalized[:, 1:2])
-    fz = f_func(xyz_normalized[:, 2:3])
+    fx = f_func(xyz_normalized[:, 0:1].clone())
+    fy = f_func(xyz_normalized[:, 1:2].clone())
+    fz = f_func(xyz_normalized[:, 2:3].clone())
     
     # Convert to LAB
     L = 116.0 * fy - 16.0  # L* in [0, 100]
@@ -75,12 +75,13 @@ def rgb_to_lab_torch_differentiable(rgb: torch.Tensor, eps: float = 1e-8) -> tor
     
     lab = torch.cat([L, a, b], dim=1)
     
-    # Clamp to valid ranges
-    lab[:, 0:1] = torch.clamp(lab[:, 0:1], 0, 100)
-    lab[:, 1:2] = torch.clamp(lab[:, 1:2], -127, 128)
-    lab[:, 2:3] = torch.clamp(lab[:, 2:3], -127, 128)
+    # Clamp to valid ranges (avoid in-place operations)
+    lab_clamped = lab.clone()
+    lab_clamped[:, 0:1] = torch.clamp(lab[:, 0:1], 0, 100)
+    lab_clamped[:, 1:2] = torch.clamp(lab[:, 1:2], -127, 128)
+    lab_clamped[:, 2:3] = torch.clamp(lab[:, 2:3], -127, 128)
     
-    return lab
+    return lab_clamped
 
 
 def rgb_to_lab_torch(rgb: torch.Tensor) -> torch.Tensor:
@@ -338,9 +339,9 @@ class PerceptualLoss(nn.Module):
         Returns:
             Perceptual loss
         """
-        # Convert to luminance (Y channel)
-        pred_luma = 0.299 * pred[:, 0:1] + 0.587 * pred[:, 1:2] + 0.114 * pred[:, 2:3]
-        target_luma = 0.299 * target[:, 0:1] + 0.587 * target[:, 1:2] + 0.114 * target[:, 2:3]
+        # Convert to luminance (Y channel) - clone to avoid views
+        pred_luma = 0.299 * pred[:, 0:1].clone() + 0.587 * pred[:, 1:2].clone() + 0.114 * pred[:, 2:3].clone()
+        target_luma = 0.299 * target[:, 0:1].clone() + 0.587 * target[:, 1:2].clone() + 0.114 * target[:, 2:3].clone()
         
         # Replicate to 3 channels for VGG
         pred_luma_3ch = pred_luma.repeat(1, 3, 1, 1)

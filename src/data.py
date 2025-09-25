@@ -309,12 +309,12 @@ class GarmentPairDataset(Dataset):
             if random.random() < 0.5:
                 stacked = torch.flip(stacked, dims=[2])
             
-            # Unstack
-            still_tensor = stacked[0:3]
-            on_model_input_tensor = stacked[3:6]
-            on_model_target_tensor = stacked[6:9]
-            mask_still_tensor = stacked[9:10]
-            mask_on_tensor = stacked[10:11]
+            # Unstack with .clone() to avoid shared memory/views
+            still_tensor = stacked[0:3].clone()
+            on_model_input_tensor = stacked[3:6].clone()
+            on_model_target_tensor = stacked[6:9].clone()
+            mask_still_tensor = stacked[9:10].clone()
+            mask_on_tensor = stacked[10:11].clone()
         
         return {
             "still_ref": still_tensor,
