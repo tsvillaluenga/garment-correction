@@ -171,22 +171,16 @@ class CheckpointManager:
             'score': score
         }
         
-        # Save checkpoint
-        if is_best and score is not None:
-            # Best checkpoint
-            checkpoint_path = self.save_dir / f"best_epoch_{epoch:03d}_score_{score:.4f}.pth"
-            self._manage_best_checkpoints(checkpoint_path, score)
-        else:
-            # Regular checkpoint
-            checkpoint_path = self.save_dir / f"epoch_{epoch:03d}.pth"
-            self._manage_last_checkpoints(checkpoint_path)
+        # Save only best.pth and latest.pth (no individual epoch files)
+        latest_path = self.save_dir / "latest.pth"
+        torch.save(checkpoint, latest_path)
         
-        torch.save(checkpoint, checkpoint_path)
-        
-        # Always save a "best.pth" and "last.pth" for easy loading
         if is_best:
-            torch.save(checkpoint, self.save_dir / "best.pth")
-        torch.save(checkpoint, self.save_dir / "last.pth")
+            best_path = self.save_dir / "best.pth"
+            torch.save(checkpoint, best_path)
+            checkpoint_path = str(best_path)
+        else:
+            checkpoint_path = str(latest_path)
         
         return str(checkpoint_path)
     
@@ -660,7 +654,8 @@ def create_timestamped_dir(base_dir: Path, prefix: str = "") -> Path:
     return timestamped_dir
 
 
-def save_config_file(config: dict, save_path: Path, model_name: str = ""):
+def save_config_file(config: dict, save_path: Path, model_name: str = "", 
+                     best_metrics: dict = None):
     """
     Save training configuration to a text file.
     
@@ -668,6 +663,7 @@ def save_config_file(config: dict, save_path: Path, model_name: str = ""):
         config: Configuration dictionary
         save_path: Path to save the config file
         model_name: Name of the model for the header
+        best_metrics: Best metrics achieved during training
     """
     import yaml
     
@@ -681,6 +677,18 @@ def save_config_file(config: dict, save_path: Path, model_name: str = ""):
         # Write configuration in YAML format
         yaml.dump(config, f, default_flow_style=False, indent=2)
         
+        # Add best metrics if provided
+        if best_metrics:
+            f.write("\n" + "="*60 + "\n")
+            f.write("BEST TRAINING RESULTS\n")
+            f.write("="*60 + "\n")
+            for key, value in best_metrics.items():
+                if isinstance(value, float):
+                    f.write(f"{key}: {value:.6f}\n")
+                else:
+                    f.write(f"{key}: {value}\n")
+            f.write("="*60 + "\n")
+        
         f.write("\n" + "="*60 + "\n")
         f.write("SYSTEM INFORMATION\n")
         f.write("="*60 + "\n")
@@ -692,6 +700,72 @@ def save_config_file(config: dict, save_path: Path, model_name: str = ""):
             if torch.cuda.device_count() > 0:
                 f.write(f"GPU Name: {torch.cuda.get_device_name(0)}\n")
         f.write("="*60 + "\n")
+
+
+def update_config_with_results(config_path: Path, best_metrics: dict):
+    """
+    Update existing config file with final training results.
+    
+    Args:
+        config_path: Path to the config file
+        best_metrics: Best metrics achieved during training
+    """
+    if not config_path.exists():
+        return
+    
+    # Read existing content
+    with open(config_path, 'r') as f:
+        content = f.read()
+    
+    # Check if results section already exists
+    if "BEST TRAINING RESULTS" in content:
+        # Replace existing results section
+        lines = content.split('\n')
+        new_lines = []
+        skip = False
+        
+        for line in lines:
+            if "BEST TRAINING RESULTS" in line:
+                skip = True
+                # Add new results section
+                new_lines.append("="*60)
+                new_lines.append("BEST TRAINING RESULTS")
+                new_lines.append("="*60)
+                for key, value in best_metrics.items():
+                    if isinstance(value, float):
+                        new_lines.append(f"{key}: {value:.6f}")
+                    else:
+                        new_lines.append(f"{key}: {value}")
+                new_lines.append("="*60)
+                continue
+            elif skip and line.startswith("="*60) and len(line) == 60:
+                skip = False
+                continue
+            elif not skip:
+                new_lines.append(line)
+        
+        content = '\n'.join(new_lines)
+    else:
+        # Add results section before system information
+        system_section = "\n" + "="*60 + "\nSYSTEM INFORMATION\n"
+        if system_section in content:
+            results_section = (
+                "\n" + "="*60 + "\n"
+                "BEST TRAINING RESULTS\n" +
+                "="*60 + "\n"
+            )
+            for key, value in best_metrics.items():
+                if isinstance(value, float):
+                    results_section += f"{key}: {value:.6f}\n"
+                else:
+                    results_section += f"{key}: {value}\n"
+            results_section += "="*60 + "\n"
+            
+            content = content.replace(system_section, results_section + system_section)
+    
+    # Write updated content
+    with open(config_path, 'w') as f:
+        f.write(content)
 
 
 def get_device() -> torch.device:

@@ -6,6 +6,7 @@ import argparse
 import logging
 import sys
 from pathlib import Path
+from datetime import datetime
 import yaml
 import torch
 import torch.nn as nn
@@ -26,7 +27,7 @@ from losses_metrics import CombinedSegLoss, compute_segmentation_metrics
 from utils import (
     set_seed, setup_logging, CheckpointManager, AverageMeter,
     create_optimizer, create_scheduler, ProgressTracker, get_device, print_system_info,
-    TrainingHistory, create_timestamped_dir, save_config_file
+    TrainingHistory, create_timestamped_dir, save_config_file, update_config_with_results
 )
 
 
@@ -375,6 +376,19 @@ def main():
         progress_tracker.print_info(f"📊 Training plots saved: {plot_path}", "bold blue")
     except Exception as e:
         logger.warning(f"Failed to generate training plots: {e}")
+    
+    # Update config file with best results
+    try:
+        best_metrics = {
+            "best_iou": best_iou,
+            "best_dice": best_dice,
+            "total_epochs_trained": config['train']['epochs'],
+            "training_completed": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        update_config_with_results(config_save_path, best_metrics)
+        progress_tracker.print_info(f"📄 Config updated with results: {config_save_path}", "bold blue")
+    except Exception as e:
+        logger.warning(f"Failed to update config with results: {e}")
 
 
 if __name__ == "__main__":
