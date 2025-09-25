@@ -123,12 +123,10 @@ def train_epoch(
         # Update progress
         progress_tracker.update_batch(batch_idx + 1)
         
-        # Log batch progress
+        # Log batch progress using the new method
         if batch_idx % 50 == 0:
-            logger.info(
-                f"Epoch {epoch:03d} [{batch_idx:04d}/{len(dataloader):04d}] "
-                f"Loss: {losses.avg:.4f} BCE: {bce_losses.avg:.4f} Dice: {dice_losses.avg:.4f}"
-            )
+            loss_info = f"Loss: {losses.avg:.4f} BCE: {bce_losses.avg:.4f} Dice: {dice_losses.avg:.4f}"
+            progress_tracker.print_batch_update(batch_idx, len(dataloader), loss_info)
     
     progress_tracker.finish_epoch()
     

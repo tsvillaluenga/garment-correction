@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import cv2
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn
+from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn, PercentageColumn
 from rich.logging import RichHandler
 from rich.text import Text
 import time
@@ -322,6 +322,7 @@ class ProgressTracker:
         self.total_epochs = 0
         self.start_time = None
         self._last_update_time = 0
+        self._batch_updates = []  # Store batch updates to print separately
     
     def start_epoch(self, total_epochs: int, current_epoch: int):
         """Start epoch progress tracking."""
@@ -329,17 +330,19 @@ class ProgressTracker:
         self.current_epoch = current_epoch
         
         if self.progress is None:
-            # Create custom progress bar with colors similar to the image
+            # Create custom progress bar with thicker bar and percentage
             self.progress = Progress(
                 TextColumn("[bold blue]Training Progress", justify="left"),
-                BarColumn(bar_width=50, style="bright_green", complete_style="bright_green"),
+                BarColumn(bar_width=80, style="white", complete_style="bright_green"),
+                PercentageColumn(),
+                TextColumn("•"),
                 MofNCompleteColumn(),
                 TextColumn("•"),
                 TimeElapsedColumn(),
                 TextColumn("•"),
                 TimeRemainingColumn(),
                 console=self.console,
-                refresh_per_second=2
+                refresh_per_second=1
             )
             self.progress.start()
             self.start_time = time.time()
@@ -357,15 +360,21 @@ class ProgressTracker:
     def start_batch(self, total_batches: int, epoch: int):
         """Start batch progress tracking."""
         self.current_epoch = epoch
-        # We don't create separate batch tasks anymore - just update the main progress
-        pass
+        # Clear previous batch updates
+        self._batch_updates = []
     
     def update_batch(self, completed_batches: int):
         """Update batch progress."""
-        # Limit updates to avoid spam
+        # Store batch update for later printing
         current_time = time.time()
         if current_time - self._last_update_time > 0.5:  # Update every 0.5 seconds max
             self._last_update_time = current_time
+            self._batch_updates.append((completed_batches, current_time))
+    
+    def print_batch_update(self, batch_idx: int, total_batches: int, loss_info: str):
+        """Print batch update on a separate line below the progress bar."""
+        # Clear the line and print batch update
+        self.console.print(f"[dim]Epoch {self.current_epoch:03d} [{batch_idx:04d}/{total_batches:04d}] {loss_info}[/dim]")
     
     def finish_epoch(self):
         """Finish epoch progress."""
