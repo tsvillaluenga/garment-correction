@@ -227,6 +227,185 @@ def apply_light_degradation(
     return np.clip(degraded, 0, 1)
 
 
+def apply_enhanced_degradation(
+    image: np.ndarray, 
+    mask: np.ndarray, 
+    mode: str = "mixed", 
+    magnitude: float = 0.06,
+    seed: Optional[int] = None
+) -> np.ndarray:
+    """
+    Apply enhanced degradation with spatial variation and mixed modes.
+    
+    Args:
+        image: RGB image [0, 1] as float32
+        mask: Binary mask [0, 1] as float32
+        mode: Degradation mode ("mixed", "hsv", "lab", "rgb")
+        magnitude: Degradation magnitude multiplier
+        seed: Random seed for reproducibility
+        
+    Returns:
+        Degraded image [0, 1] as float32
+    """
+    if seed is not None:
+        np.random.seed(seed)
+    
+    degraded = image.copy()
+    mask_bool = mask > 0.5
+    
+    if not np.any(mask_bool):
+        return degraded
+    
+    # Enhanced degradation with spatial variation
+    if mode == "mixed":
+        # Combine multiple degradation types for more realism
+        degraded = _apply_mixed_degradation(image, mask_bool, magnitude)
+    elif mode == "hsv":
+        degraded = _apply_enhanced_hsv_degradation(image, mask_bool, magnitude)
+    elif mode == "lab":
+        degraded = _apply_enhanced_lab_degradation(image, mask_bool, magnitude)
+    elif mode == "rgb":
+        degraded = _apply_enhanced_rgb_degradation(image, mask_bool, magnitude)
+    else:
+        # Fallback to original method
+        return apply_light_degradation(image, mask, mode, magnitude, seed)
+    
+    return np.clip(degraded, 0, 1)
+
+
+def _apply_mixed_degradation(image: np.ndarray, mask_bool: np.ndarray, magnitude: float) -> np.ndarray:
+    """Apply mixed degradation combining LAB and HSV."""
+    degraded = image.copy()
+    
+    # 70% LAB degradation (better for color shifts)
+    if np.random.random() < 0.7:
+        degraded = _apply_enhanced_lab_degradation(degraded, mask_bool, magnitude * 0.8)
+    
+    # 50% HSV degradation (better for saturation/brightness)
+    if np.random.random() < 0.5:
+        degraded = _apply_enhanced_hsv_degradation(degraded, mask_bool, magnitude * 0.6)
+    
+    # 30% subtle RGB noise
+    if np.random.random() < 0.3:
+        degraded = _apply_enhanced_rgb_degradation(degraded, mask_bool, magnitude * 0.4)
+    
+    return degraded
+
+
+def _apply_enhanced_hsv_degradation(image: np.ndarray, mask_bool: np.ndarray, magnitude: float) -> np.ndarray:
+    """Apply HSV degradation with spatial variation."""
+    try:
+        from scipy.ndimage import zoom
+    except ImportError:
+        # Fallback to uniform degradation if scipy not available
+        return _apply_uniform_hsv_degradation(image, mask_bool, magnitude)
+    
+    hsv = color.rgb2hsv(image)
+    h, w = mask_bool.shape[:2]
+    
+    # Generate smooth random fields for spatial variation
+    h_field = np.random.uniform(-1, 1, (max(1, h//4), max(1, w//4)))
+    s_field = np.random.uniform(-1, 1, (max(1, h//4), max(1, w//4)))
+    v_field = np.random.uniform(-1, 1, (max(1, h//4), max(1, w//4)))
+    
+    # Upsample to full resolution
+    h_field = zoom(h_field, (h/h_field.shape[0], w/h_field.shape[1]), order=1)[:h, :w]
+    s_field = zoom(s_field, (h/s_field.shape[0], w/s_field.shape[1]), order=1)[:h, :w]
+    v_field = zoom(v_field, (h/v_field.shape[0], w/v_field.shape[1]), order=1)[:h, :w]
+    
+    # Apply spatially-varying degradation
+    h_shift = h_field * magnitude * (2/360)
+    s_shift = s_field * magnitude * 0.03
+    v_shift = v_field * magnitude * 0.03
+    
+    hsv_degraded = hsv.copy()
+    hsv_degraded[mask_bool, 0] = np.clip(hsv_degraded[mask_bool, 0] + h_shift[mask_bool], 0, 1)
+    hsv_degraded[mask_bool, 1] = np.clip(hsv_degraded[mask_bool, 1] + s_shift[mask_bool], 0, 1)
+    hsv_degraded[mask_bool, 2] = np.clip(hsv_degraded[mask_bool, 2] + v_shift[mask_bool], 0, 1)
+    
+    return color.hsv2rgb(hsv_degraded)
+
+
+def _apply_enhanced_lab_degradation(image: np.ndarray, mask_bool: np.ndarray, magnitude: float) -> np.ndarray:
+    """Apply LAB degradation with spatial variation."""
+    try:
+        from scipy.ndimage import zoom
+    except ImportError:
+        # Fallback to uniform degradation if scipy not available
+        return _apply_uniform_lab_degradation(image, mask_bool, magnitude)
+    
+    lab = color.rgb2lab(image)
+    h, w = mask_bool.shape[:2]
+    
+    # Generate smooth random fields
+    l_field = np.random.uniform(-1, 1, (max(1, h//4), max(1, w//4)))
+    a_field = np.random.uniform(-1, 1, (max(1, h//4), max(1, w//4)))
+    b_field = np.random.uniform(-1, 1, (max(1, h//4), max(1, w//4)))
+    
+    # Upsample to full resolution
+    l_field = zoom(l_field, (h/l_field.shape[0], w/l_field.shape[1]), order=1)[:h, :w]
+    a_field = zoom(a_field, (h/a_field.shape[0], w/a_field.shape[1]), order=1)[:h, :w]
+    b_field = zoom(b_field, (h/b_field.shape[0], w/b_field.shape[1]), order=1)[:h, :w]
+    
+    # Apply spatially-varying degradation
+    l_shift = l_field * magnitude * 2.0
+    a_shift = a_field * magnitude * 1.5
+    b_shift = b_field * magnitude * 1.5
+    
+    lab_degraded = lab.copy()
+    lab_degraded[mask_bool, 0] = np.clip(lab_degraded[mask_bool, 0] + l_shift[mask_bool], 0, 100)
+    lab_degraded[mask_bool, 1] = np.clip(lab_degraded[mask_bool, 1] + a_shift[mask_bool], -127, 128)
+    lab_degraded[mask_bool, 2] = np.clip(lab_degraded[mask_bool, 2] + b_shift[mask_bool], -127, 128)
+    
+    return color.lab2rgb(lab_degraded)
+
+
+def _apply_enhanced_rgb_degradation(image: np.ndarray, mask_bool: np.ndarray, magnitude: float) -> np.ndarray:
+    """Apply RGB degradation with per-channel variation."""
+    degraded = image.copy()
+    
+    # Apply per-channel offset with spatial variation
+    for c in range(3):
+        offset = np.random.uniform(-4/255, 4/255) * magnitude
+        # Add some noise for realism
+        noise = np.random.normal(0, 0.5/255, mask_bool.shape) * magnitude
+        degraded[mask_bool, c] = np.clip(degraded[mask_bool, c] + offset + noise[mask_bool], 0, 1)
+    
+    return degraded
+
+
+def _apply_uniform_hsv_degradation(image: np.ndarray, mask_bool: np.ndarray, magnitude: float) -> np.ndarray:
+    """Fallback uniform HSV degradation."""
+    hsv = color.rgb2hsv(image)
+    
+    h_shift = np.random.uniform(-2/360, 2/360) * magnitude
+    s_shift = np.random.uniform(-0.03, 0.03) * magnitude
+    v_shift = np.random.uniform(-0.03, 0.03) * magnitude
+    
+    hsv_degraded = hsv.copy()
+    hsv_degraded[mask_bool, 0] = np.clip(hsv_degraded[mask_bool, 0] + h_shift, 0, 1)
+    hsv_degraded[mask_bool, 1] = np.clip(hsv_degraded[mask_bool, 1] + s_shift, 0, 1)
+    hsv_degraded[mask_bool, 2] = np.clip(hsv_degraded[mask_bool, 2] + v_shift, 0, 1)
+    
+    return color.hsv2rgb(hsv_degraded)
+
+
+def _apply_uniform_lab_degradation(image: np.ndarray, mask_bool: np.ndarray, magnitude: float) -> np.ndarray:
+    """Fallback uniform LAB degradation."""
+    lab = color.rgb2lab(image)
+    
+    l_shift = np.random.uniform(-2.0, 2.0) * magnitude
+    a_shift = np.random.uniform(-1.5, 1.5) * magnitude
+    b_shift = np.random.uniform(-1.5, 1.5) * magnitude
+    
+    lab_degraded = lab.copy()
+    lab_degraded[mask_bool, 0] = np.clip(lab_degraded[mask_bool, 0] + l_shift, 0, 100)
+    lab_degraded[mask_bool, 1] = np.clip(lab_degraded[mask_bool, 1] + a_shift, -127, 128)
+    lab_degraded[mask_bool, 2] = np.clip(lab_degraded[mask_bool, 2] + b_shift, -127, 128)
+    
+    return color.lab2rgb(lab_degraded)
+
+
 class GarmentPairDataset(Dataset):
     """Dataset for Model 1 - recoloring with degraded inputs."""
     
