@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import cv2
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn
+from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn, ProgressColumn
 from rich.logging import RichHandler
 from rich.text import Text
 import time
@@ -32,6 +32,37 @@ class PercentageColumn(TextColumn):
             percent = (task.completed / task.total) * 100
             return f"{percent:>5.1f}%"
         return "  0.0%"
+
+
+class ThickBarColumn(ProgressColumn):
+    """Custom thick progress bar column."""
+    
+    def __init__(self, bar_width: int = 40, bar_height: int = 3, style: str = "bar.back", complete_style: str = "bar.complete"):
+        self.bar_width = bar_width
+        self.bar_height = bar_height
+        self.style = style
+        self.complete_style = complete_style
+    
+    def render(self, task):
+        """Render the thick progress bar."""
+        if not task.total:
+            return Text("━" * self.bar_width, style=self.style)
+        
+        completed = int(task.completed / task.total * self.bar_width)
+        remaining = self.bar_width - completed
+        
+        # Create thick bar using block characters
+        bar_text = ""
+        
+        # Completed portion
+        if completed > 0:
+            bar_text += "█" * completed
+        
+        # Remaining portion
+        if remaining > 0:
+            bar_text += "░" * remaining
+        
+        return Text(bar_text, style=self.complete_style if completed > 0 else self.style)
 
 
 def set_seed(seed: int) -> None:
