@@ -25,7 +25,8 @@ from models.seg_unet import create_seg_model
 from losses_metrics import CombinedSegLoss, compute_segmentation_metrics
 from utils import (
     set_seed, setup_logging, CheckpointManager, AverageMeter,
-    create_optimizer, create_scheduler, ProgressTracker, get_device, print_system_info
+    create_optimizer, create_scheduler, ProgressTracker, get_device, print_system_info,
+    TrainingHistory
 )
 
 
@@ -279,6 +280,9 @@ def main():
     # Progress tracker
     progress_tracker = ProgressTracker()
     
+    # Training history tracker
+    history = TrainingHistory()
+    
     # Resume from checkpoint if specified
     start_epoch = 0
     best_iou = 0.0
@@ -311,6 +315,10 @@ def main():
             
             # Combine metrics
             all_metrics = {**train_metrics, **val_metrics}
+            
+            # Add to training history
+            history.add_train_metrics(train_metrics)
+            history.add_val_metrics(val_metrics)
             
             # Print compact epoch results
             progress_tracker.print_epoch_results(epoch, all_metrics)
@@ -349,6 +357,17 @@ def main():
         model, optimizer, scheduler, scaler, config['train']['epochs'] - 1,
         final_metrics, is_best=False
     )
+    
+    # Generate training plots
+    plot_path = save_dir / "training_curves.png"
+    history_path = save_dir / "training_history.json"
+    
+    try:
+        history.plot_curves(plot_path, "Model 3 - On-Model Segmentation Training Progress")
+        history.save_history(history_path)
+        progress_tracker.print_info(f"📊 Training plots saved: {plot_path}", "bold blue")
+    except Exception as e:
+        logger.warning(f"Failed to generate training plots: {e}")
 
 
 if __name__ == "__main__":

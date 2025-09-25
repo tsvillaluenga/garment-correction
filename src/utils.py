@@ -494,6 +494,148 @@ def count_parameters(model: nn.Module) -> int:
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
 
+def plot_training_curves(train_history: Dict[str, List[float]], 
+                         val_history: Dict[str, List[float]], 
+                         save_path: Path,
+                         title: str = "Training Progress"):
+    """
+    Plot training and validation curves.
+    
+    Args:
+        train_history: Dictionary with training metrics history
+        val_history: Dictionary with validation metrics history
+        save_path: Path to save the plot
+        title: Title for the plot
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    
+    # Set style
+    plt.style.use('seaborn-v0_8-darkgrid' if hasattr(plt.style, 'available') and 'seaborn-v0_8-darkgrid' in plt.style.available else 'default')
+    sns.set_palette("husl")
+    
+    # Get all unique metrics
+    all_metrics = set(train_history.keys()) | set(val_history.keys())
+    
+    # Filter out non-plottable metrics
+    plottable_metrics = [m for m in all_metrics if m not in ['epoch']]
+    
+    # Determine subplot layout
+    n_metrics = len(plottable_metrics)
+    if n_metrics == 0:
+        return
+    
+    # Calculate optimal subplot layout
+    if n_metrics <= 2:
+        rows, cols = 1, n_metrics
+        figsize = (6 * cols, 5)
+    elif n_metrics <= 4:
+        rows, cols = 2, 2
+        figsize = (12, 10)
+    elif n_metrics <= 6:
+        rows, cols = 2, 3
+        figsize = (18, 10)
+    else:
+        rows, cols = 3, 3
+        figsize = (18, 15)
+    
+    fig, axes = plt.subplots(rows, cols, figsize=figsize)
+    
+    # Handle single subplot case
+    if n_metrics == 1:
+        axes = [axes]
+    elif rows == 1:
+        axes = axes if isinstance(axes, (list, np.ndarray)) else [axes]
+    else:
+        axes = axes.flatten()
+    
+    # Plot each metric
+    for i, metric in enumerate(plottable_metrics):
+        if i >= len(axes):
+            break
+            
+        ax = axes[i]
+        
+        # Get epochs (assuming they're the same for train and val)
+        epochs = list(range(1, len(train_history.get(metric, [])) + 1))
+        
+        # Plot training curve
+        if metric in train_history and train_history[metric]:
+            ax.plot(epochs, train_history[metric], 
+                   label=f'Training {metric}', linewidth=2, marker='o', markersize=3)
+        
+        # Plot validation curve
+        if metric in val_history and val_history[metric]:
+            val_epochs = list(range(1, len(val_history[metric]) + 1))
+            ax.plot(val_epochs, val_history[metric], 
+                   label=f'Validation {metric}', linewidth=2, marker='s', markersize=3)
+        
+        ax.set_xlabel('Epoch')
+        ax.set_ylabel(metric.replace('_', ' ').title())
+        ax.set_title(f'{metric.replace("_", " ").title()} Evolution')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        
+        # Set y-axis to start from 0 for loss metrics
+        if 'loss' in metric.lower():
+            ax.set_ylim(bottom=0)
+    
+    # Hide unused subplots
+    for i in range(n_metrics, len(axes)):
+        axes[i].set_visible(False)
+    
+    plt.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    
+    # Save plot
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(save_path, dpi=150, bbox_inches='tight', facecolor='white')
+    plt.close()
+    
+    print(f"Training curves saved: {save_path}")
+
+
+class TrainingHistory:
+    """Class to track training history and generate plots."""
+    
+    def __init__(self):
+        self.train_history = {}
+        self.val_history = {}
+    
+    def add_train_metrics(self, metrics: Dict[str, float]):
+        """Add training metrics for current epoch."""
+        for key, value in metrics.items():
+            if key not in self.train_history:
+                self.train_history[key] = []
+            self.train_history[key].append(value)
+    
+    def add_val_metrics(self, metrics: Dict[str, float]):
+        """Add validation metrics for current epoch."""
+        for key, value in metrics.items():
+            if key not in self.val_history:
+                self.val_history[key] = []
+            self.val_history[key].append(value)
+    
+    def plot_curves(self, save_path: Path, title: str = "Training Progress"):
+        """Generate and save training curves plot."""
+        plot_training_curves(self.train_history, self.val_history, save_path, title)
+    
+    def save_history(self, save_path: Path):
+        """Save training history as JSON."""
+        import json
+        
+        history_data = {
+            'train_history': self.train_history,
+            'val_history': self.val_history
+        }
+        
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(save_path, 'w') as f:
+            json.dump(history_data, f, indent=2)
+        
+        print(f"Training history saved: {save_path}")
+
+
 def get_device() -> torch.device:
     """Get the best available device."""
     if torch.cuda.is_available():

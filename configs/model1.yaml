@@ -2,7 +2,7 @@ data_root: dataset
 img_size: 512
 train:
   batch_size: 8
-  epochs: 5 #60
+  epochs: 20 #60
   lr: 1.0e-4
   weight_decay: 0.0
   amp: true
