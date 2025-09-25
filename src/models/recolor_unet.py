@@ -237,7 +237,9 @@ class RecoloringUNet(nn.Module):
         y_pred = self.output_activation(y_pred)
         
         # Composite with original input (mask-aware)
-        output = mask_on * y_pred + (1 - mask_on) * on_model_input
+        # Use .clone() to avoid in-place operations that could break gradients
+        mask_on_safe = mask_on.clone()
+        output = mask_on_safe * y_pred + (1 - mask_on_safe) * on_model_input
         
         return output
     

@@ -181,11 +181,14 @@ class MaskedL1Loss(nn.Module):
         Returns:
             Masked L1 loss
         """
+        # Clone mask to avoid in-place modifications
+        mask_safe = mask.clone()
+        
         diff = torch.abs(pred - target)
-        masked_diff = diff * mask
+        masked_diff = diff * mask_safe
         
         if self.reduction == "mean":
-            return masked_diff.sum() / (mask.sum() + 1e-8)
+            return masked_diff.sum() / (mask_safe.sum() + 1e-8)
         elif self.reduction == "sum":
             return masked_diff.sum()
         else:
@@ -224,11 +227,12 @@ class MaskedDeltaE76Loss(nn.Module):
             # Compute Delta E
             delta_e = delta_e76_torch(pred_lab, target_lab)
             
-            # Apply mask
-            masked_delta_e = delta_e * mask
+            # Apply mask (clone to avoid in-place modifications)
+            mask_safe = mask.clone()
+            masked_delta_e = delta_e * mask_safe
             
             if self.reduction == "mean":
-                mask_sum = mask.sum()
+                mask_sum = mask_safe.sum()
                 if mask_sum > 0:
                     return masked_delta_e.sum() / mask_sum
                 else:
@@ -350,16 +354,17 @@ class PerceptualLoss(nn.Module):
         total_loss = 0.0
         for layer, weight in zip(self.layers, self.weights):
             if layer in pred_features:
-                # Resize mask to feature map size
+                # Resize mask to feature map size (clone to avoid in-place modifications)
+                mask_safe = mask.clone()
                 feat_h, feat_w = pred_features[layer].shape[2:]
-                mask_resized = F.interpolate(mask, size=(feat_h, feat_w), mode='nearest')
+                mask_resized = F.interpolate(mask_safe, size=(feat_h, feat_w), mode='nearest')
                 
                 # Masked feature loss
                 feat_diff = F.mse_loss(pred_features[layer], target_features[layer], reduction='none')
                 masked_feat_diff = feat_diff * mask_resized
                 
                 layer_loss = masked_feat_diff.sum() / (mask_resized.sum() + 1e-8)
-                total_loss += weight * layer_loss
+                total_loss = total_loss + weight * layer_loss  # Avoid in-place
         
         return total_loss
 
@@ -452,16 +457,16 @@ class CombinedRecolorLoss(nn.Module):
         if self.w_gan > 0 and fake_logits is not None:
             losses['gan'] = self.gan_loss.generator_loss(fake_logits)
         
-        # Total loss
+        # Total loss (avoid in-place operations)
         total = 0.0
         if 'l1' in losses:
-            total += self.w_l1 * losses['l1']
+            total = total + self.w_l1 * losses['l1']
         if 'delta_e' in losses:
-            total += self.w_de * losses['delta_e']
+            total = total + self.w_de * losses['delta_e']
         if 'perceptual' in losses:
-            total += self.w_perc * losses['perceptual']
+            total = total + self.w_perc * losses['perceptual']
         if 'gan' in losses:
-            total += self.w_gan * losses['gan']
+            total = total + self.w_gan * losses['gan']
         
         losses['total'] = total
         return losses
