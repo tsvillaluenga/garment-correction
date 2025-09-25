@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import cv2
 from rich.console import Console
 from rich.table import Table
-from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn
+from rich.progress import Progress, TaskID, BarColumn, TextColumn, TimeElapsedColumn, TimeRemainingColumn, MofNCompleteColumn, ProgressColumn
 from rich.logging import RichHandler
 from rich.text import Text
 import time
@@ -32,6 +32,28 @@ class PercentageColumn(TextColumn):
             percent = (task.completed / task.total) * 100
             return f"{percent:>5.1f}%"
         return "  0.0%"
+
+
+class CustomTimeRemainingColumn(ProgressColumn):
+    """Custom time remaining column that actually works."""
+    
+    def render(self, task):
+        """Render time remaining."""
+        if not task.total or task.completed == 0:
+            return Text("--:--:--", style="dim")
+        
+        # Calculate time remaining
+        elapsed = task.finished_time - task.start_time if task.finished_time else time.time() - task.start_time
+        rate = task.completed / elapsed if elapsed > 0 else 0
+        
+        if rate > 0:
+            remaining = (task.total - task.completed) / rate
+            hours = int(remaining // 3600)
+            minutes = int((remaining % 3600) // 60)
+            seconds = int(remaining % 60)
+            return Text(f"{hours:02d}:{minutes:02d}:{seconds:02d}", style="dim")
+        
+        return Text("--:--:--", style="dim")
 
 
 def set_seed(seed: int) -> None:
@@ -354,7 +376,7 @@ class ProgressTracker:
                 TextColumn("•"),
                 TimeElapsedColumn(),
                 TextColumn("•"),
-                TimeRemainingColumn(),
+                CustomTimeRemainingColumn(),
                 console=self.console,
                 refresh_per_second=1
             )

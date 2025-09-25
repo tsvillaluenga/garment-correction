@@ -95,8 +95,8 @@ def process_item(
         return False
     
     # Check if masks already exist
-    mask_still_path = output_dir / item_dir.name / "mask_still.png"
-    mask_onmodel_path = output_dir / item_dir.name / "mask_on_model.png"
+    mask_still_path = output_dir / "mask_still.png"
+    mask_onmodel_path = output_dir / "mask_on_model.png"
     
     if mask_still_path.exists() and mask_onmodel_path.exists():
         print(f"Skipping {item_dir.name}: masks already exist")
@@ -111,13 +111,9 @@ def process_item(
         onmodel_img = load_image(onmodel_path, (img_size, img_size))
         mask_onmodel = predict_mask(model_onmodel, onmodel_img, device, threshold)
         
-        # Create output directory
-        output_item_dir = output_dir / item_dir.name
-        output_item_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save masks
-        save_mask(mask_still, output_item_dir / "mask_still.png")
-        save_mask(mask_onmodel, output_item_dir / "mask_on_model.png")
+        # Save masks directly in the item directory
+        save_mask(mask_still, mask_still_path)
+        save_mask(mask_onmodel, mask_onmodel_path)
         
         return True
         
