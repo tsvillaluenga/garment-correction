@@ -21,10 +21,9 @@ from utils import get_device, setup_logging, tensor_to_image
 def parse_args():
     parser = argparse.ArgumentParser(description="Recolor garments using trained model")
     parser.add_argument("--data_root", type=str, required=True, help="Path to test dataset")
-    parser.add_argument("--ckpt_model1", type=str, required=True, help="Checkpoint for recoloring model")
+    parser.add_argument("--ckpt", type=str, required=True, help="Checkpoint for recoloring model")
     parser.add_argument("--img_size", type=int, default=512, help="Image size for processing")
     parser.add_argument("--device", type=str, help="Device to use (cuda/cpu)")
-    parser.add_argument("--save_dir", type=str, required=True, help="Directory to save results")
     parser.add_argument("--use_degraded", action="store_true", 
                        help="Use degraded_on_model.jpg instead of on_model.jpg")
     return parser.parse_args()
@@ -136,7 +135,7 @@ def main():
     
     # Load model
     logger.info("Loading recoloring model...")
-    model = load_model(args.ckpt_model1, device)
+    model = load_model(args.ckpt, device)
     logger.info("Model loaded successfully")
     
     # Find test items
@@ -160,20 +159,16 @@ def main():
     
     logger.info(f"Found {len(item_dirs)} items to process")
     
-    # Create save directory
-    save_dir = Path(args.save_dir)
-    save_dir.mkdir(parents=True, exist_ok=True)
-    
     # Process items
     success_count = 0
     for item_dir in tqdm(item_dirs, desc="Processing items"):
         if process_item(
-            item_dir, model, device, args.img_size, save_dir, args.use_degraded
+            item_dir, model, device, args.img_size, item_dir, args.use_degraded
         ):
             success_count += 1
     
     logger.info(f"Successfully processed {success_count}/{len(item_dirs)} items")
-    logger.info(f"Results saved to: {save_dir}")
+    logger.info(f"Results saved to individual item directories in: {data_root}")
 
 
 if __name__ == "__main__":
