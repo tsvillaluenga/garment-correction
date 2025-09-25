@@ -136,11 +136,22 @@ def train_epoch(
         # Backward pass
         if use_amp:
             scaler.scale(loss).backward()
+            # Gradient clipping
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             scaler.step(optimizer)
             scaler.update()
         else:
             loss.backward()
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
+        
+        # Check for NaN values
+        if torch.isnan(loss) or torch.isinf(loss):
+            logger.error(f"NaN or Inf detected in loss at batch {batch_idx}")
+            logger.error(f"Loss components: {loss_dict}")
+            raise ValueError("Training stopped due to NaN/Inf in loss")
         
         # Update metrics
         losses.update(loss.item(), still_ref.size(0))

@@ -360,8 +360,12 @@ class PerceptualLoss(nn.Module):
                 feat_h, feat_w = pred_features[layer].shape[2:]
                 mask_resized = F.interpolate(mask_safe, size=(feat_h, feat_w), mode='nearest')
                 
+                # Normalize features to prevent explosion
+                pred_feat_norm = F.normalize(pred_features[layer], p=2, dim=1)
+                target_feat_norm = F.normalize(target_features[layer], p=2, dim=1)
+                
                 # Masked feature loss
-                feat_diff = F.mse_loss(pred_features[layer], target_features[layer], reduction='none')
+                feat_diff = F.mse_loss(pred_feat_norm, target_feat_norm, reduction='none')
                 masked_feat_diff = feat_diff * mask_resized
                 
                 layer_loss = masked_feat_diff.sum() / (mask_resized.sum() + 1e-8)

@@ -3,7 +3,7 @@ img_size: 512
 train:
   batch_size: 4
   epochs: 100
-  lr: 0.0002  # Higher initial LR for scheduler
+  lr: 0.00005  # Reduced LR to prevent gradient explosion
   weight_decay: 0.0001
   amp: true
   num_workers: 4
@@ -26,12 +26,12 @@ model:
   base_channels: 96
   num_attn_blocks: 3
   num_heads: 8
-  use_gan: true
+  use_gan: false  # Disabled temporarily to prevent instability
 loss_weights:
-  w_l1: 0.5
-  w_de: 2.0
-  w_perc: 0.3
-  w_gan: 0.1
+  w_l1: 1.0
+  w_de: 0.5
+  w_perc: 0.01  # Drastically reduced perceptual loss weight
+  w_gan: 0.0  # Disabled with use_gan: false
 degrade:
   enable: true
   mode: mixed
