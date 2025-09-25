@@ -62,10 +62,8 @@ def process_item(
         print(f"Skipping {item_dir.name}: mask_on_model.png not found")
         return False
     
-    # Output path
-    output_item_dir = output_dir / item_dir.name
-    output_item_dir.mkdir(parents=True, exist_ok=True)
-    degraded_path = output_item_dir / "degraded_on_model.jpg"
+    # Output path (directly in the item directory)
+    degraded_path = output_dir / "degraded_on_model.jpg"
     
     # Skip if exists and requested
     if skip_if_exists and degraded_path.exists():
@@ -82,7 +80,7 @@ def process_item(
             onmodel_img, mask, mode=mode, magnitude=magnitude, seed=seed
         )
         
-        # Save degraded image
+        # Save degraded image directly in the item directory
         save_image(degraded_img, degraded_path)
         
         return True
