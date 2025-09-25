@@ -265,8 +265,13 @@ class PerceptualLoss(nn.Module):
         self.layers = layers
         self.weights = weights
         
-        # Load pretrained VGG19
-        vgg = models.vgg19(pretrained=True).features
+        # Load pretrained VGG19 (using new weights parameter)
+        try:
+            from torchvision.models import VGG19_Weights
+            vgg = models.vgg19(weights=VGG19_Weights.IMAGENET1K_V1).features
+        except ImportError:
+            # Fallback for older torchvision versions
+            vgg = models.vgg19(pretrained=True).features
         self.model = nn.Sequential()
         
         # Extract specific layers
@@ -283,9 +288,18 @@ class PerceptualLoss(nn.Module):
         for i in range(max_layer + 1):
             self.model.add_module(str(i), vgg[i])
         
-        # Freeze parameters
+        # Freeze parameters and ensure float32
         for param in self.model.parameters():
             param.requires_grad = False
+        
+        # Ensure model is in float32 for compatibility with AMP
+        self.model = self.model.float()
+    
+    def to(self, device):
+        """Move model to device."""
+        super().to(device)
+        self.model = self.model.to(device)
+        return self
     
     def _extract_features(self, x: torch.Tensor) -> Dict[str, torch.Tensor]:
         """Extract features from specified layers."""
@@ -297,6 +311,9 @@ class PerceptualLoss(nn.Module):
             21: 'relu4_1', 23: 'relu4_2', 25: 'relu4_3', 27: 'relu4_4',
             30: 'relu5_1'
         }
+        
+        # Ensure input is float32 for VGG19 compatibility
+        x = x.float()
         
         for i, layer in enumerate(self.model):
             x = layer(x)
@@ -387,6 +404,16 @@ class CombinedRecolorLoss(nn.Module):
         
         if w_gan > 0:
             self.gan_loss = HingeGANLoss()
+    
+    def to(self, device):
+        """Move all loss components to device."""
+        super().to(device)
+        self.l1_loss = self.l1_loss.to(device)
+        self.de_loss = self.de_loss.to(device)
+        self.perceptual_loss = self.perceptual_loss.to(device)
+        if hasattr(self, 'gan_loss'):
+            self.gan_loss = self.gan_loss.to(device)
+        return self
     
     def forward(
         self,

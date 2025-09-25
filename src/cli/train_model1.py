@@ -372,6 +372,7 @@ def main():
         w_perc=loss_weights['w_perc'],
         w_gan=loss_weights['w_gan']
     )
+    criterion.to(device)
     
     # Create optimizer and scheduler
     optimizer = create_optimizer(
