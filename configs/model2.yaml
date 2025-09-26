@@ -31,7 +31,7 @@ augment:
   brightness: [0.8, 1.2]
   contrast: [0.8, 1.2]
 val:
-  every_n_epochs: 1
+  every_n_epochs: 2
 early_stopping:
   enabled: true
   patience: 8  # Stop after 8 epochs without improvement
