@@ -32,4 +32,10 @@ augment:
   contrast: [0.8, 1.2]
 val:
   every_n_epochs: 1
+early_stopping:
+  enabled: true
+  patience: 8  # Stop after 8 epochs without improvement
+  min_delta: 0.001  # Minimum improvement threshold  
+  mode: "max"  # Monitor metric should increase (IoU)
+  restore_best_weights: true
 save_dir: runs/model2_seg_still

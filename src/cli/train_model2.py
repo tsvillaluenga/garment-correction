@@ -27,7 +27,8 @@ from losses_metrics import CombinedSegLoss, compute_segmentation_metrics
 from utils import (
     set_seed, setup_logging, CheckpointManager, AverageMeter,
     create_optimizer, create_scheduler, ProgressTracker, get_device, print_system_info,
-    TrainingHistory, create_timestamped_dir, save_config_file, update_config_with_results
+    TrainingHistory, create_timestamped_dir, save_config_file, update_config_with_results,
+    EarlyStopping
 )
 
 
@@ -289,6 +290,18 @@ def main():
     # Training history tracker
     history = TrainingHistory()
     
+    # Initialize early stopping
+    early_stopping = None
+    if config.get('early_stopping', {}).get('enabled', False):
+        early_stop_config = config['early_stopping']
+        early_stopping = EarlyStopping(
+            patience=early_stop_config.get('patience', 10),
+            min_delta=early_stop_config.get('min_delta', 0.0),
+            mode=early_stop_config.get('mode', 'max'),
+            restore_best_weights=early_stop_config.get('restore_best_weights', True)
+        )
+        progress_tracker.print_info(f"🛑 Early stopping enabled: patience={early_stopping.patience}, mode={early_stopping.mode}", "yellow")
+    
     # Resume from checkpoint if specified
     start_epoch = 0
     best_iou = 0.0
@@ -346,6 +359,16 @@ def main():
             )
             
             progress_tracker.print_checkpoint_saved(checkpoint_path.split('/')[-1])
+            
+            # Check early stopping
+            if early_stopping is not None:
+                if early_stopping(current_iou, epoch):
+                    early_info = early_stopping.get_info()
+                    progress_tracker.print_info(
+                        f"🛑 Early stopping triggered! Best IoU: {early_info['best_score']:.4f} at epoch {early_info['best_epoch']}", 
+                        "bold red"
+                    )
+                    break
         
         # Update learning rate
         scheduler_type = scheduler_config.get('type', 'cosine_annealing').lower()
@@ -363,8 +386,15 @@ def main():
     
     # Finish training
     progress_tracker.finish()
-    progress_tracker.print_info("🎉 Training completed!", "bold green")
-    progress_tracker.print_info(f"🏆 Best validation IoU: {best_iou:.4f}", "bold cyan")
+    
+    # Print training completion info
+    if early_stopping is not None and early_stopping.early_stop:
+        early_info = early_stopping.get_info()
+        progress_tracker.print_info("🛑 Training stopped early!", "bold red")
+        progress_tracker.print_info(f"🏆 Best validation IoU: {early_info['best_score']:.4f} at epoch {early_info['best_epoch']}", "bold cyan")
+    else:
+        progress_tracker.print_info("🎉 Training completed!", "bold green")
+        progress_tracker.print_info(f"🏆 Best validation IoU: {best_iou:.4f}", "bold cyan")
     
     # Save final checkpoint
     final_metrics = validate_epoch(

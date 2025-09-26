@@ -642,6 +642,69 @@ def plot_training_curves(train_history: Dict[str, List[float]],
     print(f"Training curves saved: {save_path}")
 
 
+class EarlyStopping:
+    """Early stopping to stop training when validation metric stops improving."""
+    
+    def __init__(self, patience: int = 10, min_delta: float = 0.0, mode: str = 'min', 
+                 restore_best_weights: bool = True):
+        """
+        Args:
+            patience: Number of epochs to wait after last improvement
+            min_delta: Minimum change to qualify as improvement
+            mode: 'min' for metrics that should decrease, 'max' for metrics that should increase
+            restore_best_weights: Whether to restore best weights when stopping
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.mode = mode
+        self.restore_best_weights = restore_best_weights
+        
+        self.best_score = None
+        self.counter = 0
+        self.early_stop = False
+        self.best_epoch = 0
+        
+        if mode == 'min':
+            self.monitor_op = lambda current, best: current < (best - min_delta)
+            self.best_score = float('inf')
+        else:  # mode == 'max'
+            self.monitor_op = lambda current, best: current > (best + min_delta)
+            self.best_score = float('-inf')
+    
+    def __call__(self, current_score: float, epoch: int) -> bool:
+        """
+        Check if training should stop early.
+        
+        Args:
+            current_score: Current validation metric value
+            epoch: Current epoch number
+            
+        Returns:
+            True if training should stop, False otherwise
+        """
+        if self.monitor_op(current_score, self.best_score):
+            self.best_score = current_score
+            self.best_epoch = epoch
+            self.counter = 0
+        else:
+            self.counter += 1
+        
+        if self.counter >= self.patience:
+            self.early_stop = True
+            return True
+        
+        return False
+    
+    def get_info(self) -> dict:
+        """Get early stopping information."""
+        return {
+            'best_score': self.best_score,
+            'best_epoch': self.best_epoch,
+            'patience_counter': self.counter,
+            'early_stopped': self.early_stop
+        }
+
+
 class TrainingHistory:
     """Class to track training history and generate plots."""
     

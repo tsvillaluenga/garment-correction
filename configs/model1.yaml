@@ -38,4 +38,10 @@ degrade:
   magnitude: 0.06
 val:
   every_n_epochs: 1
+early_stopping:
+  enabled: true
+  patience: 15  # Stop after 15 epochs without improvement
+  min_delta: 0.001  # Minimum improvement threshold
+  mode: "min"  # Monitor metric should decrease (Delta E)
+  restore_best_weights: true
 save_dir: runs/model1_recolor
