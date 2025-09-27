@@ -28,25 +28,41 @@ def parse_args():
                        help="Use degraded_on_model.jpg instead of on_model.jpg")
     parser.add_argument("--min_output_size", type=int, default=512, 
                        help="Minimum output image size (default: 512)")
+    parser.add_argument("--config", type=str, help="Path to model config file (optional)")
     return parser.parse_args()
 
 
-def load_model(checkpoint_path: str, device: torch.device):
+def load_model(checkpoint_path: str, device: torch.device, config_path: str = None):
     """Load recoloring model from checkpoint."""
-    # Create model (parameters should match training config)
+    # Load checkpoint first to get model parameters
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    
+    # Try to get model config from checkpoint, fallback to default
+    model_config = checkpoint.get('model_config', {})
+    
+    # If config file provided, load it
+    if config_path and Path(config_path).exists():
+        import yaml
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        model_config = config.get('model', {})
+        print(f"Using model config from: {config_path}")
+    else:
+        print("Using default model parameters (base_channels=96, num_attn_blocks=3, num_heads=8)")
+    
+    # Create model with parameters from config or defaults
     model = create_recolor_model(
-        use_gan=False,  # Assume no GAN for inference
+        use_gan=model_config.get('use_gan', False),
         in_channels=3,
         out_channels=3,
-        base_channels=64,
+        base_channels=model_config.get('base_channels', 96),  # Match config
         depth=4,
-        num_attn_blocks=2,
-        num_heads=4,
+        num_attn_blocks=model_config.get('num_attn_blocks', 3),  # Match config
+        num_heads=model_config.get('num_heads', 8),  # Match config
         dropout=0.1
     )
     
-    # Load checkpoint
-    checkpoint = torch.load(checkpoint_path, map_location=device)
+    # Load state dict
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()
@@ -148,7 +164,7 @@ def main():
     
     # Load model
     logger.info("Loading recoloring model...")
-    model = load_model(args.ckpt, device)
+    model = load_model(args.ckpt, device, args.config)
     logger.info("Model loaded successfully")
     
     # Find test items
