@@ -10,6 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
 from tqdm import tqdm
+import io
+from PIL import Image
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -119,8 +121,27 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
     
     # Convert matplotlib figure to numpy array
     fig.canvas.draw()
-    buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
-    buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+    
+    # Use buffer_rgba() instead of tostring_rgb() for compatibility
+    try:
+        # Try the newer method first
+        buf = np.frombuffer(fig.canvas.buffer_rgba(), dtype=np.uint8)
+        buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (4,))
+        # Convert RGBA to RGB
+        buf = buf[:, :, :3]
+    except AttributeError:
+        # Fallback to older method
+        try:
+            buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+        except AttributeError:
+            # Last resort: save to temporary buffer
+            buf = io.BytesIO()
+            fig.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+            buf.seek(0)
+            img = Image.open(buf)
+            buf = np.array(img)[:, :, :3]  # Remove alpha channel if present
+    
     plt.close(fig)
     
     return buf

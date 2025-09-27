@@ -26,6 +26,8 @@ def parse_args():
     parser.add_argument("--device", type=str, help="Device to use (cuda/cpu)")
     parser.add_argument("--use_degraded", action="store_true", 
                        help="Use degraded_on_model.jpg instead of on_model.jpg")
+    parser.add_argument("--min_output_size", type=int, default=512, 
+                       help="Minimum output image size (default: 512)")
     return parser.parse_args()
 
 
@@ -52,10 +54,20 @@ def load_model(checkpoint_path: str, device: torch.device):
     return model
 
 
-def save_image(image: np.ndarray, output_path: Path):
-    """Save image as JPEG."""
+def save_image(image: np.ndarray, output_path: Path, min_size: int = 512):
+    """Save image as JPEG, ensuring minimum size."""
     # Convert to 0-255 range
     image_uint8 = (np.clip(image, 0, 1) * 255).astype(np.uint8)
+    
+    # Ensure minimum size
+    h, w = image_uint8.shape[:2]
+    if h < min_size or w < min_size:
+        # Calculate scale factor to reach minimum size
+        scale = max(min_size / h, min_size / w)
+        new_h, new_w = int(h * scale), int(w * scale)
+        image_uint8 = cv2.resize(image_uint8, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        print(f"Resized image from {h}x{w} to {new_h}x{new_w} to meet minimum size {min_size}x{min_size}")
+    
     # Convert RGB to BGR for OpenCV
     image_bgr = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2BGR)
     cv2.imwrite(str(output_path), image_bgr)
@@ -67,7 +79,8 @@ def process_item(
     device: torch.device,
     img_size: int,
     save_dir: Path,
-    use_degraded: bool = False
+    use_degraded: bool = False,
+    min_output_size: int = 512
 ):
     """Process a single item directory."""
     # Check required files
@@ -114,7 +127,7 @@ def process_item(
         corrected_img = tensor_to_image(corrected)
         
         # Save result
-        save_image(corrected_img, output_path)
+        save_image(corrected_img, output_path, min_output_size)
         
         return True
         
@@ -163,7 +176,7 @@ def main():
     success_count = 0
     for item_dir in tqdm(item_dirs, desc="Processing items"):
         if process_item(
-            item_dir, model, device, args.img_size, item_dir, args.use_degraded
+            item_dir, model, device, args.img_size, item_dir, args.use_degraded, args.min_output_size
         ):
             success_count += 1
     

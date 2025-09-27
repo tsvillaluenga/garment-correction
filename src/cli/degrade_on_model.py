@@ -19,7 +19,7 @@ from utils import setup_logging
 def parse_args():
     parser = argparse.ArgumentParser(description="Create degraded on-model images")
     parser.add_argument("--data_root", type=str, required=True, help="Path to test dataset")
-    parser.add_argument("--mode", type=str, default="lab", choices=["hsv", "lab", "rgb"], 
+    parser.add_argument("--mode", type=str, default="lab", choices=["hsv", "hsl", "lab", "rgb"], 
                        help="Degradation mode")
     parser.add_argument("--magnitude", type=float, default=0.04, help="Degradation magnitude")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")

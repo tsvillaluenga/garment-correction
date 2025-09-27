@@ -436,6 +436,7 @@ def main():
     # Resume from checkpoint if specified
     start_epoch = 0
     best_delta_e = float('inf')
+    best_loss = float('inf')  # For hybrid checkpoint saving
     
     if args.resume:
         logger.info(f"Resuming from checkpoint: {args.resume}")
@@ -474,17 +475,35 @@ def main():
             # Print compact epoch results
             progress_tracker.print_epoch_results(epoch, all_metrics)
             
-            # Save checkpoint (lower Delta E is better)
+            # Hybrid checkpoint saving: Delta E if > 1.5, loss if <= 1.5
             current_delta_e = val_metrics.get('val_delta_e76_mean', val_metrics['val_delta_e'])
-            is_best = current_delta_e < best_delta_e
+            current_loss = train_metrics.get('loss', 0.0)
             
-            if is_best:
-                best_delta_e = current_delta_e
-                progress_tracker.print_best_score(best_delta_e, "Delta E")
+            # Determine which metric to use for checkpoint saving
+            if current_delta_e > 1.5:
+                # Use Delta E for coarse color correction (Delta E > 1.5)
+                is_best = current_delta_e < best_delta_e
+                if is_best:
+                    best_delta_e = current_delta_e
+                    progress_tracker.print_best_score(best_delta_e, "Delta E")
+                score_for_checkpoint = current_delta_e
+                metric_used = "Delta E"
+            else:
+                # Use total loss for fine-tuning (Delta E <= 1.5)
+                is_best = current_loss < best_loss
+                if is_best:
+                    best_loss = current_loss
+                    progress_tracker.print_best_score(best_loss, "Loss")
+                score_for_checkpoint = current_loss
+                metric_used = "Loss"
+            
+            # Log which metric is being used
+            if epoch % 5 == 0:  # Log every 5 epochs to avoid spam
+                progress_tracker.print_info(f"📊 Checkpoint metric: {metric_used} (ΔE={current_delta_e:.3f})", "dim white")
             
             checkpoint_path = checkpoint_manager.save_checkpoint(
                 model, optimizer, scheduler, scaler, epoch, all_metrics,
-                is_best=is_best, score=current_delta_e
+                is_best=is_best, score=score_for_checkpoint
             )
             
             progress_tracker.print_checkpoint_saved(checkpoint_path.split('/')[-1])
@@ -524,6 +543,7 @@ def main():
     else:
         progress_tracker.print_info("🎉 Training completed!", "bold green")
         progress_tracker.print_info(f"🏆 Best validation Delta E: {best_delta_e:.4f}", "bold cyan")
+        progress_tracker.print_info(f"🏆 Best training Loss: {best_loss:.4f}", "bold cyan")
     
     # Save final checkpoint
     final_metrics = validate_epoch(

@@ -167,7 +167,7 @@ def apply_light_degradation(
     Args:
         image: RGB image [0, 1] shape (H, W, 3)
         mask: Binary mask [0, 1] shape (H, W)
-        mode: 'hsv', 'lab', 'rgb', or enhanced modes like 'mixed'
+        mode: 'hsv', 'hsl', 'lab', 'rgb', or enhanced modes like 'mixed'
         magnitude: Degradation strength
         seed: Random seed for reproducibility
         
@@ -203,6 +203,26 @@ def apply_light_degradation(
         
         degraded = color.hsv2rgb(hsv_degraded)
         
+    elif mode == "hsl":
+        # Convert to HSL (Hue, Saturation, Lightness)
+        # Note: scikit-image doesn't have HSL, so we'll use HSV and modify V to behave like L
+        hsv = color.rgb2hsv(image)
+        
+        # Apply shifts with H fixed or minimal variation, S and L with more variation
+        h_shift = np.random.uniform(-0.5/360, 0.5/360) * magnitude  # ±0.5 degrees (minimal)
+        s_shift = np.random.uniform(-0.08, 0.08) * magnitude        # ±8% (more variation)
+        l_shift = np.random.uniform(-0.08, 0.08) * magnitude        # ±8% (more variation)
+        
+        hsv_degraded = hsv.copy()
+        # H: minimal variation (keep hue mostly fixed)
+        hsv_degraded[mask_bool, 0] = np.clip(hsv_degraded[mask_bool, 0] + h_shift, 0, 1)
+        # S: more variation (saturation changes)
+        hsv_degraded[mask_bool, 1] = np.clip(hsv_degraded[mask_bool, 1] + s_shift, 0, 1)
+        # V: more variation (lightness changes, using V as proxy for L)
+        hsv_degraded[mask_bool, 2] = np.clip(hsv_degraded[mask_bool, 2] + l_shift, 0, 1)
+        
+        degraded = color.hsv2rgb(hsv_degraded)
+        
     elif mode == "lab":
         # Convert to LAB
         lab = color.rgb2lab(image)
@@ -226,7 +246,7 @@ def apply_light_degradation(
             degraded[mask_bool, c] = np.clip(degraded[mask_bool, c] + offset, 0, 1)
     
     else:
-        raise ValueError(f"Unknown degradation mode: {mode}. Available: hsv, lab, rgb, mixed")
+        raise ValueError(f"Unknown degradation mode: {mode}. Available: hsv, hsl, lab, rgb, mixed")
     
     return np.clip(degraded, 0, 1)
 
