@@ -29,6 +29,8 @@ def parse_args():
     parser.add_argument("--min_output_size", type=int, default=512, 
                        help="Minimum output image size (default: 512)")
     parser.add_argument("--config", type=str, help="Path to model config file (optional)")
+    parser.add_argument("--overwrite", action="store_true", 
+                       help="Overwrite existing output files")
     return parser.parse_args()
 
 
@@ -96,7 +98,8 @@ def process_item(
     img_size: int,
     save_dir: Path,
     use_degraded: bool = False,
-    min_output_size: int = 512
+    min_output_size: int = 512,
+    overwrite: bool = False
 ):
     """Process a single item directory."""
     # Check required files
@@ -115,8 +118,8 @@ def process_item(
     # Output path (directly in the item directory)
     output_path = item_dir / "corrected-on-model.jpg"
     
-    # Skip if already exists
-    if output_path.exists():
+    # Skip if already exists (unless overwrite is enabled)
+    if output_path.exists() and not overwrite:
         print(f"Skipping {item_dir.name}: output already exists")
         return True
     
@@ -192,7 +195,7 @@ def main():
     success_count = 0
     for item_dir in tqdm(item_dirs, desc="Processing items"):
         if process_item(
-            item_dir, model, device, args.img_size, item_dir, args.use_degraded, args.min_output_size
+            item_dir, model, device, args.img_size, item_dir, args.use_degraded, args.min_output_size, args.overwrite
         ):
             success_count += 1
     
