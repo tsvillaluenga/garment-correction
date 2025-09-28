@@ -505,6 +505,92 @@ class DiceLoss(nn.Module):
         return 1.0 - dice.mean()
 
 
+class FocalLoss(nn.Module):
+    """Focal Loss for addressing class imbalance."""
+    
+    def __init__(self, alpha: float = 1.0, gamma: float = 2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Compute Focal Loss.
+        
+        Args:
+            pred: Predicted logits (B, 1, H, W)
+            target: Target masks (B, 1, H, W)
+            
+        Returns:
+            Focal loss
+        """
+        bce = F.binary_cross_entropy_with_logits(pred, target, reduction='none')
+        pt = torch.exp(-bce)
+        focal = self.alpha * (1 - pt) ** self.gamma * bce
+        return focal.mean()
+
+
+class TverskyLoss(nn.Module):
+    """Tversky Loss for controlling false positives/negatives."""
+    
+    def __init__(self, alpha: float = 0.3, beta: float = 0.7, smooth: float = 1.0):
+        super().__init__()
+        self.alpha = alpha  # Penalizes false negatives
+        self.beta = beta    # Penalizes false positives
+        self.smooth = smooth
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Compute Tversky Loss.
+        
+        Args:
+            pred: Predicted logits (B, 1, H, W)
+            target: Target masks (B, 1, H, W)
+            
+        Returns:
+            Tversky loss
+        """
+        pred_prob = torch.sigmoid(pred)
+        
+        intersection = (pred_prob * target).sum(dim=(2, 3))
+        fps = (pred_prob * (1 - target)).sum(dim=(2, 3))
+        fns = ((1 - pred_prob) * target).sum(dim=(2, 3))
+        
+        tversky = (intersection + self.smooth) / (intersection + self.alpha * fns + self.beta * fps + self.smooth)
+        return 1 - tversky.mean()
+
+
+class BoundaryLoss(nn.Module):
+    """Boundary Loss for focusing on edge precision."""
+    
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """
+        Compute Boundary Loss.
+        
+        Args:
+            pred: Predicted logits (B, 1, H, W)
+            target: Target masks (B, 1, H, W)
+            
+        Returns:
+            Boundary loss
+        """
+        pred_prob = torch.sigmoid(pred)
+        
+        # Calculate gradients to detect edges
+        pred_grad_x = torch.abs(pred_prob[:, :, 1:, :] - pred_prob[:, :, :-1, :])
+        pred_grad_y = torch.abs(pred_prob[:, :, :, 1:] - pred_prob[:, :, :, :-1])
+        pred_grad = pred_grad_x[:, :, :, :-1] + pred_grad_y[:, :, :-1, :]
+        
+        target_grad_x = torch.abs(target[:, :, 1:, :] - target[:, :, :-1, :])
+        target_grad_y = torch.abs(target[:, :, :, 1:] - target[:, :, :, :-1])
+        target_grad = target_grad_x[:, :, :, :-1] + target_grad_y[:, :, :-1, :]
+        
+        return F.mse_loss(pred_grad, target_grad)
+
+
 class CombinedSegLoss(nn.Module):
     """Combined BCE + Dice loss for segmentation."""
     
@@ -533,6 +619,54 @@ class CombinedSegLoss(nn.Module):
         losses['bce'] = self.bce_loss(pred, target)
         losses['dice'] = self.dice_loss(pred, target)
         losses['total'] = self.bce_weight * losses['bce'] + self.dice_weight * losses['dice']
+        
+        return losses
+
+
+class AdvancedSegLoss(nn.Module):
+    """Advanced segmentation loss combining multiple loss functions."""
+    
+    def __init__(self, bce_weight: float = 0.3, dice_weight: float = 0.3, 
+                 focal_weight: float = 0.2, tversky_weight: float = 0.1, 
+                 boundary_weight: float = 0.1):
+        super().__init__()
+        
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
+        self.focal_weight = focal_weight
+        self.tversky_weight = tversky_weight
+        self.boundary_weight = boundary_weight
+        
+        self.bce_loss = nn.BCEWithLogitsLoss()
+        self.dice_loss = DiceLoss()
+        self.focal_loss = FocalLoss(alpha=1.0, gamma=2.0)
+        self.tversky_loss = TverskyLoss(alpha=0.3, beta=0.7)
+        self.boundary_loss = BoundaryLoss()
+    
+    def forward(self, pred: torch.Tensor, target: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """
+        Compute advanced segmentation loss.
+        
+        Args:
+            pred: Predicted logits (B, 1, H, W)
+            target: Target masks (B, 1, H, W)
+            
+        Returns:
+            Dictionary of losses
+        """
+        losses = {}
+        
+        losses['bce'] = self.bce_loss(pred, target)
+        losses['dice'] = self.dice_loss(pred, target)
+        losses['focal'] = self.focal_loss(pred, target)
+        losses['tversky'] = self.tversky_loss(pred, target)
+        losses['boundary'] = self.boundary_loss(pred, target)
+        
+        losses['total'] = (self.bce_weight * losses['bce'] + 
+                          self.dice_weight * losses['dice'] + 
+                          self.focal_weight * losses['focal'] + 
+                          self.tversky_weight * losses['tversky'] + 
+                          self.boundary_weight * losses['boundary'])
         
         return losses
 

@@ -22,8 +22,8 @@ except ImportError:
 sys.path.append(str(Path(__file__).parent.parent))
 
 from data import GarmentSegDataset, create_dataloader
-from models.seg_unet import create_seg_model
-from losses_metrics import CombinedSegLoss, compute_segmentation_metrics
+from models.seg_unet import create_seg_model, EnhancedSegmentationUNet
+from losses_metrics import CombinedSegLoss, AdvancedSegLoss, compute_segmentation_metrics
 from utils import (
     set_seed, setup_logging, CheckpointManager, AverageMeter,
     create_optimizer, create_scheduler, ProgressTracker, get_device, print_system_info,
@@ -245,20 +245,43 @@ def main():
     
     # Create model
     logger.info("Creating model...")
-    model = create_seg_model(
-        model_type="basic",
-        in_channels=3,
-        base_channels=64,
-        depth=4,
-        dropout=0.1
-    )
+    model_config = config.get('model', {})
+    model_type = model_config.get('type', 'basic')
+    
+    if model_type == 'enhanced':
+        model = EnhancedSegmentationUNet(
+            in_channels=3,
+            out_channels=1,
+            base_channels=model_config.get('base_channels', 96),
+            depth=4,
+            use_attention=model_config.get('use_attention', True),
+            dropout=model_config.get('dropout', 0.2)
+        )
+    else:
+        model = create_seg_model(
+            model_type="basic",
+            in_channels=3,
+            base_channels=model_config.get('base_channels', 64),
+            depth=4,
+            dropout=model_config.get('dropout', 0.1)
+        )
     model.to(device)
     
     param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
     logger.info(f"Model parameters: {param_count:,}")
     
     # Create loss function
-    criterion = CombinedSegLoss(bce_weight=1.0, dice_weight=1.0)
+    loss_weights = config.get('loss_weights', {})
+    if model_type == 'enhanced':
+        criterion = AdvancedSegLoss(
+            bce_weight=loss_weights.get('bce_weight', 0.3),
+            dice_weight=loss_weights.get('dice_weight', 0.3),
+            focal_weight=loss_weights.get('focal_weight', 0.2),
+            tversky_weight=loss_weights.get('tversky_weight', 0.1),
+            boundary_weight=loss_weights.get('boundary_weight', 0.1)
+        )
+    else:
+        criterion = CombinedSegLoss(bce_weight=1.0, dice_weight=1.0)
     
     # Create optimizer and scheduler
     optimizer = create_optimizer(
