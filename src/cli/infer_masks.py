@@ -34,24 +34,37 @@ def parse_args():
 
 def load_model(checkpoint_path: str, device: torch.device):
     """Load segmentation model from checkpoint."""
-    # Load checkpoint to get model config
+    # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location=device)
-    model_config = checkpoint.get('model_config', {})
+    state_dict = checkpoint['model_state_dict']
     
-    # Determine model type and parameters
-    model_type = model_config.get('type', 'basic')
-    base_channels = model_config.get('base_channels', 64)
-    use_attention = model_config.get('use_attention', False)
-    dropout = model_config.get('dropout', 0.1)
+    # Detect model architecture from state dict
+    # Check if it has attention layers (EnhancedSegmentationUNet)
+    has_attention = any('attention' in key for key in state_dict.keys())
     
-    # Create model based on config
-    if model_type == 'enhanced':
+    # Detect base_channels from first encoder layer
+    # encoder.0.conv.conv1.conv.weight shape is [base_channels, 3, 3, 3]
+    first_conv_key = 'init_conv.conv1.conv.weight'
+    if first_conv_key in state_dict:
+        base_channels = state_dict[first_conv_key].shape[0]
+    else:
+        # Fallback: check encoder first layer
+        encoder_key = 'encoder.0.conv.conv1.conv.weight'
+        if encoder_key in state_dict:
+            base_channels = state_dict[encoder_key].shape[1]  # Input channels to first encoder
+        else:
+            base_channels = 64  # Default fallback
+    
+    print(f"Detected model: base_channels={base_channels}, has_attention={has_attention}")
+    
+    # Create model based on detected architecture
+    if has_attention or base_channels > 64:
         model = EnhancedSegmentationUNet(
             in_channels=3,
             base_channels=base_channels,
             depth=4,
-            use_attention=use_attention,
-            dropout=dropout
+            use_attention=True,
+            dropout=0.2
         )
     else:
         model = create_seg_model(
@@ -59,11 +72,11 @@ def load_model(checkpoint_path: str, device: torch.device):
             in_channels=3,
             base_channels=base_channels,
             depth=4,
-            dropout=dropout
+            dropout=0.1
         )
     
     # Load state dict
-    model.load_state_dict(checkpoint['model_state_dict'])
+    model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
     
