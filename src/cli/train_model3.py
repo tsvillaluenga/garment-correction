@@ -251,7 +251,6 @@ def main():
     if model_type == 'enhanced':
         model = EnhancedSegmentationUNet(
             in_channels=3,
-            out_channels=1,
             base_channels=model_config.get('base_channels', 96),
             depth=4,
             use_attention=model_config.get('use_attention', True),
