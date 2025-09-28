@@ -711,6 +711,96 @@ class GarmentSegDataset(Dataset):
         return image_tensor, mask_tensor
 
 
+class DualInputSegDataset(Dataset):
+    """Dataset for Model 3 with dual inputs: still + on_model for better segmentation."""
+    
+    def __init__(
+        self,
+        data_root: str,
+        split: str = "train",
+        img_size: int = 512,
+        augment_params: Optional[Dict] = None
+    ):
+        self.data_root = Path(data_root)
+        self.split = split
+        self.img_size = img_size
+        self.augment_params = augment_params or {}
+        
+        # Find all item directories
+        split_dir = self.data_root / split
+        self.items = []
+        if split_dir.exists():
+            for item_dir in sorted(split_dir.iterdir()):
+                if item_dir.is_dir():
+                    required_files = ["still.jpg", "on_model.jpg", "mask_still.png", "mask_on_model.png"]
+                    if all((item_dir / f).exists() for f in required_files):
+                        self.items.append(item_dir)
+        
+        if not self.items:
+            raise ValueError(f"No valid items found in {split_dir}")
+        
+        self.augment = self.augment_params and split == "train"
+        
+        # Create albumentations transform if augmentations are enabled
+        if self.augment:
+            self.transform = get_segmentation_transforms(self.augment_params, self.img_size)
+        else:
+            # Simple transform for validation/test
+            self.transform = A.Compose([
+                A.Resize(self.img_size, self.img_size),
+                ToTensorV2()
+            ])
+    
+    def __len__(self) -> int:
+        return len(self.items)
+    
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        item_dir = self.items[idx]
+        
+        # Load all images and masks
+        still = load_image(item_dir / "still.jpg", (self.img_size, self.img_size))
+        on_model = load_image(item_dir / "on_model.jpg", (self.img_size, self.img_size))
+        mask_still = load_mask(item_dir / "mask_still.png", (self.img_size, self.img_size))
+        mask_on_model = load_mask(item_dir / "mask_on_model.png", (self.img_size, self.img_size))
+        
+        if self.augment:
+            # Convert to uint8 for albumentations (0-255 range)
+            still_uint8 = (still * 255).astype(np.uint8)
+            on_model_uint8 = (on_model * 255).astype(np.uint8)
+            mask_still_uint8 = (mask_still * 255).astype(np.uint8)
+            mask_on_model_uint8 = (mask_on_model * 255).astype(np.uint8)
+            
+            # Apply same augmentation to still and its mask
+            still_transformed = self.transform(image=still_uint8, mask=mask_still_uint8)
+            still_tensor = still_transformed['image'].float() / 255.0
+            mask_still_tensor = still_transformed['mask'].unsqueeze(0).float() / 255.0
+            
+            # Apply same augmentation to on_model and its mask
+            on_model_transformed = self.transform(image=on_model_uint8, mask=mask_on_model_uint8)
+            on_model_tensor = on_model_transformed['image'].float() / 255.0
+            mask_on_model_tensor = on_model_transformed['mask'].unsqueeze(0).float() / 255.0
+            
+        else:
+            # Simple transform for validation/test
+            still_transformed = self.transform(image=(still * 255).astype(np.uint8))
+            on_model_transformed = self.transform(image=(on_model * 255).astype(np.uint8))
+            
+            still_tensor = still_transformed['image'].float() / 255.0
+            on_model_tensor = on_model_transformed['image'].float() / 255.0
+            mask_still_tensor = torch.from_numpy(mask_still).unsqueeze(0).float()
+            mask_on_model_tensor = torch.from_numpy(mask_on_model).unsqueeze(0).float()
+        
+        return {
+            "still": still_tensor,                    # Reference garment image
+            "on_model": on_model_tensor,             # Image to segment
+            "mask_still": mask_still_tensor,         # Reference mask (for auxiliary loss)
+            "mask_on_model": mask_on_model_tensor,   # Target mask
+            "meta": {
+                "item_path": str(item_dir)
+            }
+        }
+
+
 def create_dataloader(
     dataset: Dataset,
     batch_size: int,

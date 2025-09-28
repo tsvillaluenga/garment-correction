@@ -671,6 +671,81 @@ class AdvancedSegLoss(nn.Module):
         return losses
 
 
+class DualTaskSegLoss(nn.Module):
+    """Multi-task loss for dual-input segmentation: main + auxiliary tasks."""
+    
+    def __init__(self, main_weight: float = 1.0, aux_weight: float = 0.3,
+                 bce_weight: float = 0.3, dice_weight: float = 0.3, 
+                 focal_weight: float = 0.2, tversky_weight: float = 0.1, 
+                 boundary_weight: float = 0.1):
+        super().__init__()
+        
+        self.main_weight = main_weight
+        self.aux_weight = aux_weight
+        
+        # Individual loss components
+        self.bce_loss = nn.BCEWithLogitsLoss()
+        self.dice_loss = DiceLoss()
+        self.focal_loss = FocalLoss(alpha=1.0, gamma=2.0)
+        self.tversky_loss = TverskyLoss(alpha=0.3, beta=0.7)
+        self.boundary_loss = BoundaryLoss()
+        
+        # Loss weights
+        self.bce_weight = bce_weight
+        self.dice_weight = dice_weight
+        self.focal_weight = focal_weight
+        self.tversky_weight = tversky_weight
+        self.boundary_weight = boundary_weight
+    
+    def _compute_seg_loss(self, pred: torch.Tensor, target: torch.Tensor) -> Dict[str, torch.Tensor]:
+        """Compute segmentation loss components."""
+        losses = {}
+        
+        losses['bce'] = self.bce_loss(pred, target)
+        losses['dice'] = self.dice_loss(pred, target)
+        losses['focal'] = self.focal_loss(pred, target)
+        losses['tversky'] = self.tversky_loss(pred, target)
+        losses['boundary'] = self.boundary_loss(pred, target)
+        
+        losses['total'] = (self.bce_weight * losses['bce'] + 
+                          self.dice_weight * losses['dice'] + 
+                          self.focal_weight * losses['focal'] + 
+                          self.tversky_weight * losses['tversky'] + 
+                          self.boundary_weight * losses['boundary'])
+        
+        return losses
+    
+    def forward(self, predictions: Dict[str, torch.Tensor], 
+                targets: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+        """
+        Compute dual-task segmentation loss.
+        
+        Args:
+            predictions: Dict with 'main' and 'aux' predictions
+            targets: Dict with 'main' and 'aux' targets
+            
+        Returns:
+            Dictionary of losses
+        """
+        # Main task loss (on-model segmentation)
+        main_losses = self._compute_seg_loss(predictions['main'], targets['main'])
+        
+        # Auxiliary task loss (still segmentation)
+        aux_losses = self._compute_seg_loss(predictions['aux'], targets['aux'])
+        
+        # Combine losses
+        combined_losses = {}
+        for key in main_losses.keys():
+            combined_losses[f'main_{key}'] = main_losses[key]
+            combined_losses[f'aux_{key}'] = aux_losses[key]
+        
+        # Total combined loss
+        combined_losses['total'] = (self.main_weight * main_losses['total'] + 
+                                   self.aux_weight * aux_losses['total'])
+        
+        return combined_losses
+
+
 # Evaluation metrics
 def compute_segmentation_metrics(pred: torch.Tensor, target: torch.Tensor, threshold: float = 0.5) -> Dict[str, float]:
     """

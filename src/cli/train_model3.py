@@ -21,9 +21,9 @@ except ImportError:
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from data import GarmentSegDataset, create_dataloader
-from models.seg_unet import create_seg_model, EnhancedSegmentationUNet
-from losses_metrics import CombinedSegLoss, AdvancedSegLoss, compute_segmentation_metrics
+from data import GarmentSegDataset, DualInputSegDataset, create_dataloader
+from models.seg_unet import create_seg_model, EnhancedSegmentationUNet, DualInputSegmentationUNet
+from losses_metrics import CombinedSegLoss, AdvancedSegLoss, DualTaskSegLoss, compute_segmentation_metrics
 from utils import (
     set_seed, setup_logging, CheckpointManager, AverageMeter,
     create_optimizer, create_scheduler, ProgressTracker, get_device, print_system_info,
@@ -51,23 +51,40 @@ def load_config(config_path: str) -> dict:
 
 def create_datasets(config: dict):
     """Create training and validation datasets."""
-    # Training dataset
-    train_dataset = GarmentSegDataset(
-        data_root=config['data_root'],
-        split='train',
-        img_size=config['img_size'],
-        target_type='on_model',  # Different from model 2
-        augment_params=config.get('augment', {})
-    )
+    model_type = config.get('model', {}).get('type', 'basic')
     
-    # Validation dataset
-    val_dataset = GarmentSegDataset(
-        data_root=config['data_root'],
-        split='val',
-        img_size=config['img_size'],
-        target_type='on_model',  # Different from model 2
-        augment_params=None  # No augmentation for validation
-    )
+    if model_type == 'dual_input':
+        # Use dual-input dataset for better segmentation
+        train_dataset = DualInputSegDataset(
+            data_root=config['data_root'],
+            split='train',
+            img_size=config['img_size'],
+            augment_params=config.get('augment', {})
+        )
+        
+        val_dataset = DualInputSegDataset(
+            data_root=config['data_root'],
+            split='val',
+            img_size=config['img_size'],
+            augment_params=None  # No augmentation for validation
+        )
+    else:
+        # Use single-input dataset (backward compatibility)
+        train_dataset = GarmentSegDataset(
+            data_root=config['data_root'],
+            split='train',
+            img_size=config['img_size'],
+            target_type='on_model',
+            augment_params=config.get('augment', {})
+        )
+        
+        val_dataset = GarmentSegDataset(
+            data_root=config['data_root'],
+            split='val',
+            img_size=config['img_size'],
+            target_type='on_model',
+            augment_params=None
+        )
     
     return train_dataset, val_dataset
 
@@ -93,20 +110,44 @@ def train_epoch(
     
     progress_tracker.start_batch(len(dataloader), epoch)
     
-    for batch_idx, (images, masks) in enumerate(dataloader):
-        images = images.to(device, non_blocking=True)
-        masks = masks.to(device, non_blocking=True)
+    for batch_idx, batch_data in enumerate(dataloader):
+        # Handle both dual-input and single-input formats
+        if isinstance(batch_data, dict):
+            # Dual-input format
+            still = batch_data['still'].to(device, non_blocking=True)
+            on_model = batch_data['on_model'].to(device, non_blocking=True)
+            mask_still = batch_data['mask_still'].to(device, non_blocking=True)
+            mask_on_model = batch_data['mask_on_model'].to(device, non_blocking=True)
+            batch_size = still.size(0)
+            is_dual_input = True
+        else:
+            # Single-input format (backward compatibility)
+            images, masks = batch_data
+            images = images.to(device, non_blocking=True)
+            masks = masks.to(device, non_blocking=True)
+            batch_size = images.size(0)
+            is_dual_input = False
         
         optimizer.zero_grad()
         
         if use_amp:
             with autocast(AMP_DEVICE) if AMP_DEVICE else autocast():
-                logits = model(images)
-                loss_dict = criterion(logits, masks)
+                if is_dual_input:
+                    predictions = model(still, on_model, mask_still)
+                    targets = {'main': mask_on_model, 'aux': mask_still}
+                    loss_dict = criterion(predictions, targets)
+                else:
+                    logits = model(images)
+                    loss_dict = criterion(logits, masks)
                 loss = loss_dict['total']
         else:
-            logits = model(images)
-            loss_dict = criterion(logits, masks)
+            if is_dual_input:
+                predictions = model(still, on_model, mask_still)
+                targets = {'main': mask_on_model, 'aux': mask_still}
+                loss_dict = criterion(predictions, targets)
+            else:
+                logits = model(images)
+                loss_dict = criterion(logits, masks)
             loss = loss_dict['total']
         
         # Backward pass
@@ -119,9 +160,13 @@ def train_epoch(
             optimizer.step()
         
         # Update metrics
-        losses.update(loss.item(), images.size(0))
-        bce_losses.update(loss_dict['bce'].item(), images.size(0))
-        dice_losses.update(loss_dict['dice'].item(), images.size(0))
+        losses.update(loss.item(), batch_size)
+        if is_dual_input:
+            bce_losses.update(loss_dict['main_bce'].item(), batch_size)
+            dice_losses.update(loss_dict['main_dice'].item(), batch_size)
+        else:
+            bce_losses.update(loss_dict['bce'].item(), batch_size)
+            dice_losses.update(loss_dict['dice'].item(), batch_size)
         
         # Update progress
         progress_tracker.update_batch(batch_idx + 1)
@@ -157,17 +202,43 @@ def validate_epoch(
     all_metrics = []
     
     with torch.no_grad():
-        for images, masks in dataloader:
-            images = images.to(device, non_blocking=True)
-            masks = masks.to(device, non_blocking=True)
-            
-            logits = model(images)
-            loss_dict = criterion(logits, masks)
+        for batch_data in dataloader:
+            # Handle both dual-input and single-input formats
+            if isinstance(batch_data, dict):
+                # Dual-input format
+                still = batch_data['still'].to(device, non_blocking=True)
+                on_model = batch_data['on_model'].to(device, non_blocking=True)
+                mask_still = batch_data['mask_still'].to(device, non_blocking=True)
+                mask_on_model = batch_data['mask_on_model'].to(device, non_blocking=True)
+                batch_size = still.size(0)
+                is_dual_input = True
+                
+                predictions = model(still, on_model, mask_still)
+                targets = {'main': mask_on_model, 'aux': mask_still}
+                loss_dict = criterion(predictions, targets)
+                
+                # Use main prediction for metrics (on-model segmentation)
+                logits = predictions['main']
+                masks = mask_on_model
+            else:
+                # Single-input format (backward compatibility)
+                images, masks = batch_data
+                images = images.to(device, non_blocking=True)
+                masks = masks.to(device, non_blocking=True)
+                batch_size = images.size(0)
+                is_dual_input = False
+                
+                logits = model(images)
+                loss_dict = criterion(logits, masks)
             
             # Update loss metrics
-            losses.update(loss_dict['total'].item(), images.size(0))
-            bce_losses.update(loss_dict['bce'].item(), images.size(0))
-            dice_losses.update(loss_dict['dice'].item(), images.size(0))
+            losses.update(loss_dict['total'].item(), batch_size)
+            if is_dual_input:
+                bce_losses.update(loss_dict['main_bce'].item(), batch_size)
+                dice_losses.update(loss_dict['main_dice'].item(), batch_size)
+            else:
+                bce_losses.update(loss_dict['bce'].item(), batch_size)
+                dice_losses.update(loss_dict['dice'].item(), batch_size)
             
             # Compute segmentation metrics
             seg_metrics = compute_segmentation_metrics(logits, masks, threshold)
@@ -248,7 +319,15 @@ def main():
     model_config = config.get('model', {})
     model_type = model_config.get('type', 'basic')
     
-    if model_type == 'enhanced':
+    if model_type == 'dual_input':
+        model = DualInputSegmentationUNet(
+            in_channels=3,
+            base_channels=model_config.get('base_channels', 96),
+            depth=4,
+            use_attention=model_config.get('use_attention', True),
+            dropout=model_config.get('dropout', 0.2)
+        )
+    elif model_type == 'enhanced':
         model = EnhancedSegmentationUNet(
             in_channels=3,
             base_channels=model_config.get('base_channels', 96),
@@ -271,7 +350,17 @@ def main():
     
     # Create loss function
     loss_weights = config.get('loss_weights', {})
-    if model_type == 'enhanced':
+    if model_type == 'dual_input':
+        criterion = DualTaskSegLoss(
+            main_weight=loss_weights.get('main_weight', 1.0),
+            aux_weight=loss_weights.get('aux_weight', 0.3),
+            bce_weight=loss_weights.get('bce_weight', 0.3),
+            dice_weight=loss_weights.get('dice_weight', 0.3),
+            focal_weight=loss_weights.get('focal_weight', 0.2),
+            tversky_weight=loss_weights.get('tversky_weight', 0.1),
+            boundary_weight=loss_weights.get('boundary_weight', 0.1)
+        )
+    elif model_type == 'enhanced':
         criterion = AdvancedSegLoss(
             bce_weight=loss_weights.get('bce_weight', 0.3),
             dice_weight=loss_weights.get('dice_weight', 0.3),

@@ -23,8 +23,8 @@ scheduler:
   factor: 0.5
   min_lr: 0.00001
 model:
-  type: "enhanced"  # Use EnhancedSegmentationUNet with attention
-  base_channels: 96  # Increase from 64 to 96
+  type: "dual_input"  # Use DualInputSegmentationUNet with cross-attention
+  base_channels: 96   # Increase from 64 to 96
   use_attention: true
   dropout: 0.2
 
@@ -32,6 +32,11 @@ seg:
   threshold: 0.3  # Lower threshold for better edge detection
 
 loss_weights:
+  # Multi-task weights
+  main_weight: 1.0    # On-model segmentation (primary task)
+  aux_weight: 0.3     # Still segmentation (auxiliary task)
+  
+  # Individual loss components
   bce_weight: 0.3
   dice_weight: 0.3
   focal_weight: 0.2

@@ -13,7 +13,7 @@ from tqdm import tqdm
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from models.seg_unet import create_seg_model, EnhancedSegmentationUNet
+from models.seg_unet import create_seg_model, EnhancedSegmentationUNet, DualInputSegmentationUNet
 from data import load_image
 from utils import get_device, setup_logging
 
@@ -40,26 +40,45 @@ def load_model(checkpoint_path: str, device: torch.device):
     state_dict = checkpoint['model_state_dict']
     
     # Detect model architecture from state dict
-    # Check if it has attention layers (EnhancedSegmentationUNet)
+    # Check if it has dual encoders (DualInputSegmentationUNet)
+    has_dual_encoders = any('still_encoder' in key for key in state_dict.keys())
+    
+    # Check if it has attention layers
     has_attention = any('attention' in key for key in state_dict.keys())
     
     # Detect base_channels from first encoder layer
-    # encoder.0.conv.conv1.conv.weight shape is [base_channels, 3, 3, 3]
-    first_conv_key = 'init_conv.conv1.conv.weight'
-    if first_conv_key in state_dict:
-        base_channels = state_dict[first_conv_key].shape[0]
-    else:
-        # Fallback: check encoder first layer
-        encoder_key = 'encoder.0.conv.conv1.conv.weight'
-        if encoder_key in state_dict:
-            base_channels = state_dict[encoder_key].shape[1]  # Input channels to first encoder
+    if has_dual_encoders:
+        # Dual-input model
+        first_conv_key = 'onmodel_encoder.init_conv.conv1.conv.weight'
+        if first_conv_key in state_dict:
+            base_channels = state_dict[first_conv_key].shape[0]
         else:
-            base_channels = 64  # Default fallback
+            base_channels = 96  # Default for dual-input
+    else:
+        # Single-input model
+        first_conv_key = 'init_conv.conv1.conv.weight'
+        if first_conv_key in state_dict:
+            base_channels = state_dict[first_conv_key].shape[0]
+        else:
+            # Fallback: check encoder first layer
+            encoder_key = 'encoder.0.conv.conv1.conv.weight'
+            if encoder_key in state_dict:
+                base_channels = state_dict[encoder_key].shape[1]  # Input channels to first encoder
+            else:
+                base_channels = 64  # Default fallback
     
-    print(f"Detected model: base_channels={base_channels}, has_attention={has_attention}")
+    print(f"Detected model: base_channels={base_channels}, has_attention={has_attention}, dual_input={has_dual_encoders}")
     
     # Create model based on detected architecture
-    if has_attention or base_channels > 64:
+    if has_dual_encoders:
+        model = DualInputSegmentationUNet(
+            in_channels=3,
+            base_channels=base_channels,
+            depth=4,
+            use_attention=True,
+            dropout=0.2
+        )
+    elif has_attention or base_channels > 64:
         model = EnhancedSegmentationUNet(
             in_channels=3,
             base_channels=base_channels,
@@ -84,13 +103,29 @@ def load_model(checkpoint_path: str, device: torch.device):
     return model
 
 
-def predict_mask(model, image: np.ndarray, device: torch.device, threshold: float = 0.5):
+def predict_mask(model, image: np.ndarray, device: torch.device, threshold: float = 0.5, 
+                 still_image: np.ndarray = None, still_mask: np.ndarray = None):
     """Predict mask for a single image."""
     # Convert to tensor
     image_tensor = torch.from_numpy(image).permute(2, 0, 1).unsqueeze(0).to(device)
     
     with torch.no_grad():
-        logits = model(image_tensor)
+        # Check if model is dual-input
+        if hasattr(model, 'still_encoder') and still_image is not None:
+            # Dual-input model
+            still_tensor = torch.from_numpy(still_image).permute(2, 0, 1).unsqueeze(0).to(device)
+            
+            if still_mask is not None:
+                still_mask_tensor = torch.from_numpy(still_mask).unsqueeze(0).unsqueeze(0).to(device)
+            else:
+                still_mask_tensor = None
+            
+            predictions = model(still_tensor, image_tensor, still_mask_tensor)
+            logits = predictions['main']  # Use main prediction (on-model segmentation)
+        else:
+            # Single-input model
+            logits = model(image_tensor)
+        
         prob = torch.sigmoid(logits)
         mask = (prob > threshold).float()
     
@@ -138,13 +173,25 @@ def process_item(
         return True
     
     try:
-        # Load and process still image
+        # Step 1: Load and process still image (always first)
         still_img = load_image(still_path, (img_size, img_size))
         mask_still = predict_mask(model_still, still_img, device, threshold)
         
-        # Load and process on-model image
+        # Step 2: Load on-model image
         onmodel_img = load_image(onmodel_path, (img_size, img_size))
-        mask_onmodel = predict_mask(model_onmodel, onmodel_img, device, threshold)
+        
+        # Step 3: Process on-model image (may use still image and mask as reference)
+        if hasattr(model_onmodel, 'still_encoder'):
+            # Dual-input model: use still image and mask as reference
+            mask_onmodel = predict_mask(
+                model_onmodel, onmodel_img, device, threshold,
+                still_image=still_img, still_mask=mask_still
+            )
+            print(f"Using dual-input approach for {item_dir.name}")
+        else:
+            # Single-input model: traditional approach
+            mask_onmodel = predict_mask(model_onmodel, onmodel_img, device, threshold)
+            print(f"Using single-input approach for {item_dir.name}")
         
         # Resize masks to output size if different from processing size
         if output_size != img_size:
@@ -155,10 +202,11 @@ def process_item(
         save_mask(mask_still, mask_still_path)
         save_mask(mask_onmodel, mask_onmodel_path)
         
+        print(f"✅ Processed {item_dir.name}: masks saved")
         return True
         
     except Exception as e:
-        print(f"Error processing {item_dir.name}: {e}")
+        print(f"❌ Error processing {item_dir.name}: {e}")
         return False
 
 
