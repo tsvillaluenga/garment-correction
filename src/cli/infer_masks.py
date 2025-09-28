@@ -29,6 +29,7 @@ def parse_args():
     parser.add_argument("--device", type=str, help="Device to use (cuda/cpu)")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size for inference")
     parser.add_argument("--output_dir", type=str, help="Output directory (default: same as input)")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing mask files")
     return parser.parse_args()
 
 
@@ -113,7 +114,8 @@ def process_item(
     img_size: int,
     output_size: int,
     threshold: float,
-    output_dir: Path = None
+    output_dir: Path = None,
+    overwrite: bool = False
 ):
     """Process a single item directory."""
     if output_dir is None:
@@ -131,7 +133,7 @@ def process_item(
     mask_still_path = output_dir / "mask_still.png"
     mask_onmodel_path = output_dir / "mask_on_model.png"
     
-    if mask_still_path.exists() and mask_onmodel_path.exists():
+    if mask_still_path.exists() and mask_onmodel_path.exists() and not overwrite:
         print(f"Skipping {item_dir.name}: masks already exist")
         return True
     
@@ -207,7 +209,7 @@ def main():
     for item_dir in tqdm(item_dirs, desc="Processing items"):
         if process_item(
             item_dir, model_still, model_onmodel,
-            device, args.img_size, args.output_size, args.thresh, output_dir
+            device, args.img_size, args.output_size, args.thresh, output_dir, args.overwrite
         ):
             success_count += 1
     
