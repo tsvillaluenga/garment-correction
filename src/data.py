@@ -84,23 +84,19 @@ def get_segmentation_transforms(augment_config: Dict, img_size: int = 512) -> A.
     
     if augment_config.get('gaussian_noise', False):
         transforms_list.append(A.GaussNoise(
-            var_limit=(10.0, 50.0), p=0.2
+            noise_scale_factor=0.1, p=0.2
         ))
     
     # Content augmentations (medium-high impact)
     if augment_config.get('cutout', False):
         transforms_list.append(A.CoarseDropout(
-            max_holes=8, max_height=32, max_width=32, 
-            min_holes=1, min_height=8, min_width=8,
-            p=0.3
+            holes=8, height=32, width=32, p=0.3
         ))
     
     if augment_config.get('random_erasing', False):
         # RandomErasing is not available in albumentations, use CoarseDropout instead
         transforms_list.append(A.CoarseDropout(
-            max_holes=4, max_height=16, max_width=16, 
-            min_holes=1, min_height=4, min_width=4,
-            p=0.2
+            holes=4, height=16, width=16, p=0.2
         ))
     
     # Always resize to target size
@@ -306,8 +302,8 @@ def apply_light_degradation(
         
         # Apply shifts with H fixed or minimal variation, S and L with more variation
         h_shift = np.random.uniform(-0.5/360, 0.5/360) * magnitude  # ±0.5 degrees (minimal)
-        s_shift = np.random.uniform(-0.08, 0.08) * magnitude        # ±8% (more variation)
-        l_shift = np.random.uniform(-0.08, 0.08) * magnitude        # ±8% (more variation)
+        s_shift = np.random.uniform(-0.15, 0.15) * magnitude        # ±15% (increased variation)
+        l_shift = np.random.uniform(-0.15, 0.15) * magnitude        # ±15% (increased variation)
         
         hsv_degraded = hsv.copy()
         # H: minimal variation (keep hue mostly fixed)
