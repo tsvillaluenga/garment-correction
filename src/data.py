@@ -700,7 +700,8 @@ class GarmentSegDataset(Dataset):
         image_tensor = transformed['image']  # Already a tensor from ToTensorV2
         mask_tensor = transformed['mask'].unsqueeze(0)  # Add channel dimension
         
-        # Convert mask back to float and normalize
+        # Convert to float32 and normalize to [0, 1]
+        image_tensor = image_tensor.float() / 255.0
         mask_tensor = mask_tensor.float() / 255.0
         
         # Ensure tensors are contiguous and have correct size
