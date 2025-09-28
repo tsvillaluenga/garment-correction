@@ -26,13 +26,21 @@ def parse_args():
     parser.add_argument("--skip_if_exists", action="store_true", 
                        help="Skip items that already have degraded images")
     parser.add_argument("--output_dir", type=str, help="Output directory (default: same as input)")
+    parser.add_argument("--output_size", type=int, default=512, help="Output image size")
     return parser.parse_args()
 
 
-def save_image(image: np.ndarray, output_path: Path):
+def save_image(image: np.ndarray, output_path: Path, output_size: int = None):
     """Save image as JPEG."""
     # Convert to 0-255 range
     image_uint8 = (np.clip(image, 0, 1) * 255).astype(np.uint8)
+    
+    # Resize if output size is specified
+    if output_size is not None:
+        h, w = image_uint8.shape[:2]
+        if h != output_size or w != output_size:
+            image_uint8 = cv2.resize(image_uint8, (output_size, output_size), interpolation=cv2.INTER_LINEAR)
+    
     # Convert RGB to BGR for OpenCV
     image_bgr = cv2.cvtColor(image_uint8, cv2.COLOR_RGB2BGR)
     cv2.imwrite(str(output_path), image_bgr)
@@ -44,6 +52,7 @@ def process_item(
     magnitude: float,
     seed: int,
     skip_if_exists: bool,
+    output_size: int,
     output_dir: Path = None
 ):
     """Process a single item directory."""
@@ -81,7 +90,7 @@ def process_item(
         )
         
         # Save degraded image directly in the item directory
-        save_image(degraded_img, degraded_path)
+        save_image(degraded_img, degraded_path, output_size)
         
         return True
         
@@ -128,7 +137,7 @@ def main():
     for item_dir in tqdm(item_dirs, desc="Processing items"):
         if process_item(
             item_dir, args.mode, args.magnitude, args.seed,
-            args.skip_if_exists, output_dir
+            args.skip_if_exists, args.output_size, output_dir
         ):
             success_count += 1
     

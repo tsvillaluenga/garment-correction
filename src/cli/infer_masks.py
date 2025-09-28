@@ -80,6 +80,7 @@ def process_item(
     model_onmodel,
     device: torch.device,
     img_size: int,
+    output_size: int,
     threshold: float,
     output_dir: Path = None
 ):
@@ -111,6 +112,11 @@ def process_item(
         # Load and process on-model image
         onmodel_img = load_image(onmodel_path, (img_size, img_size))
         mask_onmodel = predict_mask(model_onmodel, onmodel_img, device, threshold)
+        
+        # Resize masks to output size if different from processing size
+        if output_size != img_size:
+            mask_still = cv2.resize(mask_still, (output_size, output_size), interpolation=cv2.INTER_NEAREST)
+            mask_onmodel = cv2.resize(mask_onmodel, (output_size, output_size), interpolation=cv2.INTER_NEAREST)
         
         # Save masks directly in the item directory
         save_mask(mask_still, mask_still_path)
@@ -170,7 +176,7 @@ def main():
     for item_dir in tqdm(item_dirs, desc="Processing items"):
         if process_item(
             item_dir, model_still, model_onmodel,
-            device, args.img_size, args.thresh, output_dir
+            device, args.img_size, args.output_size, args.thresh, output_dir
         ):
             success_count += 1
     

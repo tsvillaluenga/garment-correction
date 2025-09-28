@@ -39,8 +39,7 @@ def get_segmentation_transforms(augment_config: Dict, img_size: int = 512) -> A.
         transforms_list.append(A.Rotate(
             limit=augment_config['rotate_deg'], 
             p=0.7,
-            border_mode=cv2.BORDER_CONSTANT,
-            value=0
+            border_mode=cv2.BORDER_CONSTANT
         ))
     
     if augment_config.get('scale'):
@@ -52,23 +51,20 @@ def get_segmentation_transforms(augment_config: Dict, img_size: int = 512) -> A.
     
     if augment_config.get('elastic_transform', False):
         transforms_list.append(A.ElasticTransform(
-            alpha=1, sigma=50, alpha_affine=50, p=0.3,
-            border_mode=cv2.BORDER_CONSTANT,
-            value=0
+            alpha=1, sigma=50, p=0.3,
+            border_mode=cv2.BORDER_CONSTANT
         ))
     
     if augment_config.get('grid_distortion', False):
         transforms_list.append(A.GridDistortion(
             num_steps=5, distort_limit=0.3, p=0.3,
-            border_mode=cv2.BORDER_CONSTANT,
-            value=0
+            border_mode=cv2.BORDER_CONSTANT
         ))
     
     if augment_config.get('perspective_transform', False):
         transforms_list.append(A.Perspective(
             scale=(0.05, 0.1), p=0.3,
-            border_mode=cv2.BORDER_CONSTANT,
-            value=0
+            border_mode=cv2.BORDER_CONSTANT
         ))
     
     # Color augmentations (medium impact)
@@ -96,12 +92,15 @@ def get_segmentation_transforms(augment_config: Dict, img_size: int = 512) -> A.
         transforms_list.append(A.CoarseDropout(
             max_holes=8, max_height=32, max_width=32, 
             min_holes=1, min_height=8, min_width=8,
-            fill_value=0, p=0.3
+            p=0.3
         ))
     
     if augment_config.get('random_erasing', False):
-        transforms_list.append(A.RandomErasing(
-            scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0, p=0.2
+        # RandomErasing is not available in albumentations, use CoarseDropout instead
+        transforms_list.append(A.CoarseDropout(
+            max_holes=4, max_height=16, max_width=16, 
+            min_holes=1, min_height=4, min_width=4,
+            p=0.2
         ))
     
     # Always resize to target size

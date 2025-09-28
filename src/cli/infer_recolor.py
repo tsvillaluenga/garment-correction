@@ -31,6 +31,7 @@ def parse_args():
     parser.add_argument("--config", type=str, help="Path to model config file (optional)")
     parser.add_argument("--overwrite", action="store_true", 
                        help="Overwrite existing output files")
+    parser.add_argument("--output_size", type=int, default=512, help="Output image size")
     return parser.parse_args()
 
 
@@ -72,12 +73,19 @@ def load_model(checkpoint_path: str, device: torch.device, config_path: str = No
     return model
 
 
-def save_image(image: np.ndarray, output_path: Path, min_size: int = 512):
-    """Save image as JPEG, ensuring minimum size."""
+def save_image(image: np.ndarray, output_path: Path, min_size: int = 512, output_size: int = None):
+    """Save image as JPEG, ensuring minimum size and optional resizing."""
     # Convert to 0-255 range
     image_uint8 = (np.clip(image, 0, 1) * 255).astype(np.uint8)
     
-    # Ensure minimum size
+    # Resize to output size if specified
+    if output_size is not None:
+        h, w = image_uint8.shape[:2]
+        if h != output_size or w != output_size:
+            image_uint8 = cv2.resize(image_uint8, (output_size, output_size), interpolation=cv2.INTER_LINEAR)
+            print(f"Resized image from {h}x{w} to {output_size}x{output_size}")
+    
+    # Ensure minimum size (only if output_size not specified or smaller than min_size)
     h, w = image_uint8.shape[:2]
     if h < min_size or w < min_size:
         # Calculate scale factor to reach minimum size
@@ -99,7 +107,8 @@ def process_item(
     save_dir: Path,
     use_degraded: bool = False,
     min_output_size: int = 512,
-    overwrite: bool = False
+    overwrite: bool = False,
+    output_size: int = None
 ):
     """Process a single item directory."""
     # Check required files
@@ -146,7 +155,7 @@ def process_item(
         corrected_img = tensor_to_image(corrected)
         
         # Save result
-        save_image(corrected_img, output_path, min_output_size)
+        save_image(corrected_img, output_path, min_output_size, output_size)
         
         return True
         
@@ -195,7 +204,7 @@ def main():
     success_count = 0
     for item_dir in tqdm(item_dirs, desc="Processing items"):
         if process_item(
-            item_dir, model, device, args.img_size, item_dir, args.use_degraded, args.min_output_size, args.overwrite
+            item_dir, model, device, args.img_size, item_dir, args.use_degraded, args.min_output_size, args.overwrite, args.output_size
         ):
             success_count += 1
     
