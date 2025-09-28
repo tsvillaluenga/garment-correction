@@ -13,7 +13,7 @@ from tqdm import tqdm
 # Add src to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from models.seg_unet import create_seg_model
+from models.seg_unet import create_seg_model, EnhancedSegmentationUNet
 from data import load_image
 from utils import get_device, setup_logging
 
@@ -34,17 +34,35 @@ def parse_args():
 
 def load_model(checkpoint_path: str, device: torch.device):
     """Load segmentation model from checkpoint."""
-    # Create model
-    model = create_seg_model(
-        model_type="basic",
-        in_channels=3,
-        base_channels=64,
-        depth=4,
-        dropout=0.1
-    )
-    
-    # Load checkpoint
+    # Load checkpoint to get model config
     checkpoint = torch.load(checkpoint_path, map_location=device)
+    model_config = checkpoint.get('model_config', {})
+    
+    # Determine model type and parameters
+    model_type = model_config.get('type', 'basic')
+    base_channels = model_config.get('base_channels', 64)
+    use_attention = model_config.get('use_attention', False)
+    dropout = model_config.get('dropout', 0.1)
+    
+    # Create model based on config
+    if model_type == 'enhanced':
+        model = EnhancedSegmentationUNet(
+            in_channels=3,
+            base_channels=base_channels,
+            depth=4,
+            use_attention=use_attention,
+            dropout=dropout
+        )
+    else:
+        model = create_seg_model(
+            model_type="basic",
+            in_channels=3,
+            base_channels=base_channels,
+            depth=4,
+            dropout=dropout
+        )
+    
+    # Load state dict
     model.load_state_dict(checkpoint['model_state_dict'])
     model.to(device)
     model.eval()
