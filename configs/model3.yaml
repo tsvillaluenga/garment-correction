@@ -1,17 +1,17 @@
 data_root: dataset
 img_size: 512
 train:
-  batch_size: 16
-  epochs: 40 #50
-  lr: 0.0001  # Higher initial LR for scheduler
-  weight_decay: 0.0001
+  batch_size: 8  # Reduced for stability with complex augmentations
+  epochs: 60  # Increased for better convergence
+  lr: 0.00003  # More conservative LR
+  weight_decay: 0.0005  # Increased regularization
   amp: true
   num_workers: 4
   seed: 42
 scheduler:
   type: "cosine_annealing"  # Options: cosine_annealing, step, exponential, reduce_on_plateau
   # For cosine_annealing
-  T_max: 40  # Total epochs
+  T_max: 60  # Total epochs
   eta_min: 0.00001  # Minimum LR
   # For step scheduler
   step_size: 10
@@ -23,19 +23,33 @@ scheduler:
   factor: 0.5
   min_lr: 0.00001
 seg:
-  threshold: 0.4
+  threshold: 0.3  # Lower threshold for better edge detection
 augment:
+  # Geometric transformations (high impact)
   hflip: true
-  rotate_deg: 15
-  scale: [0.8, 1.2]
-  brightness: [0.8, 1.2]
-  contrast: [0.8, 1.2]
+  rotate_deg: 25  # Increased from 15
+  scale: [0.6, 1.4]  # Increased range
+  elastic_transform: true
+  grid_distortion: true
+  perspective_transform: true
+  
+  # Color augmentations (medium impact)
+  brightness: [0.6, 1.4]  # Increased range
+  contrast: [0.6, 1.4]  # Increased range
+  hue_shift: true
+  saturation_shift: true
+  gaussian_noise: true
+  
+  # Content augmentations (medium-high impact)
+  cutout: true
+  mixup: true
+  random_erasing: true
 val:
   every_n_epochs: 2
 early_stopping:
   enabled: true
-  patience: 10  # Stop after 10 epochs without improvement
-  min_delta: 0.001  # Minimum improvement threshold
+  patience: 20  # Increased patience for complex augmentations
+  min_delta: 0.0005  # Stricter improvement threshold
   mode: "max"  # Monitor metric should increase (IoU)
   restore_best_weights: true
 save_dir: runs/model3_seg_onmodel

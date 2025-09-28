@@ -14,6 +14,103 @@ from PIL import Image
 from skimage import color
 from torch.utils.data import Dataset
 from torchvision import transforms
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
+
+
+def get_segmentation_transforms(augment_config: Dict, img_size: int = 512) -> A.Compose:
+    """
+    Get advanced augmentation transforms for segmentation.
+    
+    Args:
+        augment_config: Augmentation configuration dictionary
+        img_size: Target image size
+        
+    Returns:
+        Albumentations compose transform
+    """
+    transforms_list = []
+    
+    # Geometric transformations (high impact)
+    if augment_config.get('hflip', False):
+        transforms_list.append(A.HorizontalFlip(p=0.5))
+    
+    if augment_config.get('rotate_deg', 0) > 0:
+        transforms_list.append(A.Rotate(
+            limit=augment_config['rotate_deg'], 
+            p=0.7,
+            border_mode=cv2.BORDER_CONSTANT,
+            value=0
+        ))
+    
+    if augment_config.get('scale'):
+        scale_range = augment_config['scale']
+        transforms_list.append(A.RandomScale(
+            scale_limit=(scale_range[0] - 1.0, scale_range[1] - 1.0), 
+            p=0.7
+        ))
+    
+    if augment_config.get('elastic_transform', False):
+        transforms_list.append(A.ElasticTransform(
+            alpha=1, sigma=50, alpha_affine=50, p=0.3,
+            border_mode=cv2.BORDER_CONSTANT,
+            value=0
+        ))
+    
+    if augment_config.get('grid_distortion', False):
+        transforms_list.append(A.GridDistortion(
+            num_steps=5, distort_limit=0.3, p=0.3,
+            border_mode=cv2.BORDER_CONSTANT,
+            value=0
+        ))
+    
+    if augment_config.get('perspective_transform', False):
+        transforms_list.append(A.Perspective(
+            scale=(0.05, 0.1), p=0.3,
+            border_mode=cv2.BORDER_CONSTANT,
+            value=0
+        ))
+    
+    # Color augmentations (medium impact)
+    if augment_config.get('brightness') and augment_config.get('contrast'):
+        brightness_range = augment_config['brightness']
+        contrast_range = augment_config['contrast']
+        transforms_list.append(A.RandomBrightnessContrast(
+            brightness_limit=(brightness_range[0] - 1.0, brightness_range[1] - 1.0),
+            contrast_limit=(contrast_range[0] - 1.0, contrast_range[1] - 1.0),
+            p=0.5
+        ))
+    
+    if augment_config.get('hue_shift', False):
+        transforms_list.append(A.HueSaturationValue(
+            hue_shift_limit=20, sat_shift_limit=30, val_shift_limit=20, p=0.3
+        ))
+    
+    if augment_config.get('gaussian_noise', False):
+        transforms_list.append(A.GaussNoise(
+            var_limit=(10.0, 50.0), p=0.2
+        ))
+    
+    # Content augmentations (medium-high impact)
+    if augment_config.get('cutout', False):
+        transforms_list.append(A.CoarseDropout(
+            max_holes=8, max_height=32, max_width=32, 
+            min_holes=1, min_height=8, min_width=8,
+            fill_value=0, p=0.3
+        ))
+    
+    if augment_config.get('random_erasing', False):
+        transforms_list.append(A.RandomErasing(
+            scale=(0.02, 0.33), ratio=(0.3, 3.3), value=0, p=0.2
+        ))
+    
+    # Always resize to target size
+    transforms_list.append(A.Resize(img_size, img_size))
+    
+    # Convert to tensor
+    transforms_list.append(ToTensorV2())
+    
+    return A.Compose(transforms_list)
 
 
 def load_image(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) -> np.ndarray:
@@ -572,6 +669,16 @@ class GarmentSegDataset(Dataset):
             raise ValueError(f"No valid items found in {split_dir}")
         
         self.augment = self.augment_params and split == "train"
+        
+        # Create albumentations transform if augmentations are enabled
+        if self.augment:
+            self.transform = get_segmentation_transforms(self.augment_params, self.img_size)
+        else:
+            # Simple transform for validation/test
+            self.transform = A.Compose([
+                A.Resize(self.img_size, self.img_size),
+                ToTensorV2()
+            ])
     
     def __len__(self) -> int:
         return len(self.items)
@@ -583,19 +690,19 @@ class GarmentSegDataset(Dataset):
         image = load_image(item_dir / self.img_name, (self.img_size, self.img_size))
         mask = load_mask(item_dir / self.mask_name, (self.img_size, self.img_size))
         
-        # Convert to tensors
-        image_tensor = torch.from_numpy(image).permute(2, 0, 1)
-        mask_tensor = torch.from_numpy(mask).unsqueeze(0)
+        # Convert to uint8 for albumentations (0-255 range)
+        image_uint8 = (image * 255).astype(np.uint8)
+        mask_uint8 = (mask * 255).astype(np.uint8)
         
-        # Apply augmentations if enabled
-        if self.augment:
-            # Horizontal flip
-            if self.augment_params.get("hflip", False) and random.random() < 0.5:
-                image_tensor = torch.flip(image_tensor, dims=[2])
-                mask_tensor = torch.flip(mask_tensor, dims=[2])
-            
-            # Note: More complex augmentations (rotation, scale) are disabled 
-            # to avoid tensor size mismatches in DataLoader batching
+        # Apply albumentations transform
+        transformed = self.transform(image=image_uint8, mask=mask_uint8)
+        
+        # Extract transformed image and mask
+        image_tensor = transformed['image']  # Already a tensor from ToTensorV2
+        mask_tensor = transformed['mask'].unsqueeze(0)  # Add channel dimension
+        
+        # Convert mask back to float and normalize
+        mask_tensor = mask_tensor.float() / 255.0
         
         # Ensure tensors are contiguous and have correct size
         image_tensor = image_tensor.contiguous()

@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument("--ckpt_still", type=str, required=True, help="Checkpoint for still segmentation model")
     parser.add_argument("--ckpt_onmodel", type=str, required=True, help="Checkpoint for on-model segmentation model")
     parser.add_argument("--img_size", type=int, default=512, help="Image size for processing")
+    parser.add_argument("--output_size", type=int, default=512, help="Output image size (default: same as img_size)")
     parser.add_argument("--thresh", type=float, default=0.5, help="Threshold for binary segmentation")
     parser.add_argument("--device", type=str, help="Device to use (cuda/cpu)")
     parser.add_argument("--batch_size", type=int, default=4, help="Batch size for inference")
