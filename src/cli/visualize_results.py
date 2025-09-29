@@ -114,15 +114,20 @@ def compute_image_iou(img1_path: Path, img2_path: Path, grid_size: int) -> float
 
 
 def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: int = 14) -> np.ndarray:
-    """Create a labeled comparison image using matplotlib with IoU calculation."""
+    """Create a labeled comparison image using matplotlib with IoU calculations."""
     # Create the grid
     grid = create_comparison_grid(item_dir, grid_size)
     
     # Compute IoU between on_model and corrected images
     on_model_path = item_dir / "on_model.jpg"
     corrected_path = item_dir / "corrected-on-model.jpg"
-    iou_value = compute_image_iou(on_model_path, corrected_path, grid_size)
-    iou_percentage = iou_value * 100
+    degraded_path = item_dir / "degraded_on_model.jpg"
+    
+    iou_corrected = compute_image_iou(on_model_path, corrected_path, grid_size)
+    iou_degraded = compute_image_iou(on_model_path, degraded_path, grid_size)
+    
+    iou_corrected_pct = iou_corrected * 100
+    iou_degraded_pct = iou_degraded * 100
     
     # Create matplotlib figure
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
@@ -159,12 +164,19 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
         ax.add_patch(rect)
     
     # Add IoU information at the bottom
-    fig.text(0.5, 0.02, f'IoU Similarity: {iou_percentage:.1f}%', 
-             ha='center', va='bottom', fontsize=font_size+2, fontweight='bold',
-             bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.8))
+    fig.text(0.5, 0.05, f'Degraded vs Original: {iou_degraded_pct:.1f}% | Corrected vs Original: {iou_corrected_pct:.1f}%', 
+             ha='center', va='bottom', fontsize=font_size+1, fontweight='bold',
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8))
+    
+    # Add improvement information
+    improvement = iou_corrected_pct - iou_degraded_pct
+    improvement_color = "lightgreen" if improvement > 0 else "lightcoral"
+    fig.text(0.5, 0.01, f'Improvement: {improvement:+.1f}%', 
+             ha='center', va='bottom', fontsize=font_size, fontweight='bold',
+             bbox=dict(boxstyle="round,pad=0.2", facecolor=improvement_color, alpha=0.8))
     
     plt.tight_layout()
-    plt.subplots_adjust(bottom=0.1)  # Make room for IoU text
+    plt.subplots_adjust(bottom=0.15)  # Make room for IoU text
     
     # Convert matplotlib figure to numpy array
     fig.canvas.draw()
@@ -236,7 +248,7 @@ def create_summary_grid(item_dirs: list, output_path: Path, rows: int = 4, cols:
     print(f"Summary grid saved: {output_path}")
 
 
-def process_item(item_dir: Path, output_dir: Path, grid_size: int, font_size: int) -> tuple[bool, float]:
+def process_item(item_dir: Path, output_dir: Path, grid_size: int, font_size: int) -> tuple[bool, float, float]:
     """Process a single item and create comparison image with IoU."""
     try:
         # Create labeled comparison
@@ -249,16 +261,19 @@ def process_item(item_dir: Path, output_dir: Path, grid_size: int, font_size: in
         comparison_bgr = cv2.cvtColor(comparison_img, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(output_path), comparison_bgr)
         
-        # Compute IoU for return value
+        # Compute IoU for return values
         on_model_path = item_dir / "on_model.jpg"
         corrected_path = item_dir / "corrected-on-model.jpg"
-        iou_value = compute_image_iou(on_model_path, corrected_path, grid_size)
+        degraded_path = item_dir / "degraded_on_model.jpg"
         
-        return True, iou_value
+        iou_corrected = compute_image_iou(on_model_path, corrected_path, grid_size)
+        iou_degraded = compute_image_iou(on_model_path, degraded_path, grid_size)
+        
+        return True, iou_corrected, iou_degraded
         
     except Exception as e:
         print(f"Error processing {item_dir.name}: {e}")
-        return False, 0.0
+        return False, 0.0, 0.0
 
 
 def main():
@@ -299,13 +314,17 @@ def main():
     # Process items
     successful = 0
     failed = 0
-    iou_values = []
+    iou_corrected_values = []
+    iou_degraded_values = []
+    improvement_values = []
     
     for item_dir in tqdm(item_dirs, desc="Creating visualizations"):
-        success, iou = process_item(item_dir, output_dir, args.grid_size, args.font_size)
+        success, iou_corrected, iou_degraded = process_item(item_dir, output_dir, args.grid_size, args.font_size)
         if success:
             successful += 1
-            iou_values.append(iou)
+            iou_corrected_values.append(iou_corrected)
+            iou_degraded_values.append(iou_degraded)
+            improvement_values.append(iou_corrected - iou_degraded)
         else:
             failed += 1
     
@@ -314,29 +333,71 @@ def main():
         logger.warning(f"Failed to create {failed} visualizations")
     
     # Print IoU statistics
-    if iou_values:
-        mean_iou = np.mean(iou_values)
-        std_iou = np.std(iou_values)
-        min_iou = np.min(iou_values)
-        max_iou = np.max(iou_values)
+    if iou_corrected_values:
+        # Corrected vs Original statistics
+        mean_corrected = np.mean(iou_corrected_values)
+        std_corrected = np.std(iou_corrected_values)
+        min_corrected = np.min(iou_corrected_values)
+        max_corrected = np.max(iou_corrected_values)
         
-        logger.info(f"IoU Statistics:")
-        logger.info(f"  Mean: {mean_iou:.3f} ({mean_iou*100:.1f}%)")
-        logger.info(f"  Std:  {std_iou:.3f} ({std_iou*100:.1f}%)")
-        logger.info(f"  Min:  {min_iou:.3f} ({min_iou*100:.1f}%)")
-        logger.info(f"  Max:  {max_iou:.3f} ({max_iou*100:.1f}%)")
+        # Degraded vs Original statistics
+        mean_degraded = np.mean(iou_degraded_values)
+        std_degraded = np.std(iou_degraded_values)
+        min_degraded = np.min(iou_degraded_values)
+        max_degraded = np.max(iou_degraded_values)
+        
+        # Improvement statistics
+        mean_improvement = np.mean(improvement_values)
+        std_improvement = np.std(improvement_values)
+        min_improvement = np.min(improvement_values)
+        max_improvement = np.max(improvement_values)
+        
+        logger.info(f"IoU Statistics (Corrected vs Original):")
+        logger.info(f"  Mean: {mean_corrected:.3f} ({mean_corrected*100:.1f}%)")
+        logger.info(f"  Std:  {std_corrected:.3f} ({std_corrected*100:.1f}%)")
+        logger.info(f"  Min:  {min_corrected:.3f} ({min_corrected*100:.1f}%)")
+        logger.info(f"  Max:  {max_corrected:.3f} ({max_corrected*100:.1f}%)")
+        
+        logger.info(f"IoU Statistics (Degraded vs Original):")
+        logger.info(f"  Mean: {mean_degraded:.3f} ({mean_degraded*100:.1f}%)")
+        logger.info(f"  Std:  {std_degraded:.3f} ({std_degraded*100:.1f}%)")
+        logger.info(f"  Min:  {min_degraded:.3f} ({min_degraded*100:.1f}%)")
+        logger.info(f"  Max:  {max_degraded:.3f} ({max_degraded*100:.1f}%)")
+        
+        logger.info(f"Improvement Statistics (Corrected - Degraded):")
+        logger.info(f"  Mean: {mean_improvement:+.3f} ({mean_improvement*100:+.1f}%)")
+        logger.info(f"  Std:  {std_improvement:.3f} ({std_improvement*100:.1f}%)")
+        logger.info(f"  Min:  {min_improvement:+.3f} ({min_improvement*100:+.1f}%)")
+        logger.info(f"  Max:  {max_improvement:+.3f} ({max_improvement*100:+.1f}%)")
         
         # Save IoU statistics to file
         stats_path = output_dir / "iou_statistics.txt"
         with open(stats_path, 'w') as f:
-            f.write(f"IoU Statistics for {len(iou_values)} items:\n")
-            f.write(f"Mean: {mean_iou:.3f} ({mean_iou*100:.1f}%)\n")
-            f.write(f"Std:  {std_iou:.3f} ({std_iou*100:.1f}%)\n")
-            f.write(f"Min:  {min_iou:.3f} ({min_iou*100:.1f}%)\n")
-            f.write(f"Max:  {max_iou:.3f} ({max_iou*100:.1f}%)\n")
-            f.write(f"\nIndividual IoU values:\n")
-            for i, (item_dir, iou) in enumerate(zip(item_dirs[:len(iou_values)], iou_values)):
-                f.write(f"{item_dir.name}: {iou:.3f} ({iou*100:.1f}%)\n")
+            f.write(f"IoU Statistics for {len(iou_corrected_values)} items:\n\n")
+            
+            f.write(f"Corrected vs Original:\n")
+            f.write(f"  Mean: {mean_corrected:.3f} ({mean_corrected*100:.1f}%)\n")
+            f.write(f"  Std:  {std_corrected:.3f} ({std_corrected*100:.1f}%)\n")
+            f.write(f"  Min:  {min_corrected:.3f} ({min_corrected*100:.1f}%)\n")
+            f.write(f"  Max:  {max_corrected:.3f} ({max_corrected*100:.1f}%)\n\n")
+            
+            f.write(f"Degraded vs Original:\n")
+            f.write(f"  Mean: {mean_degraded:.3f} ({mean_degraded*100:.1f}%)\n")
+            f.write(f"  Std:  {std_degraded:.3f} ({std_degraded*100:.1f}%)\n")
+            f.write(f"  Min:  {min_degraded:.3f} ({min_degraded*100:.1f}%)\n")
+            f.write(f"  Max:  {max_degraded:.3f} ({max_degraded*100:.1f}%)\n\n")
+            
+            f.write(f"Improvement (Corrected - Degraded):\n")
+            f.write(f"  Mean: {mean_improvement:+.3f} ({mean_improvement*100:+.1f}%)\n")
+            f.write(f"  Std:  {std_improvement:.3f} ({std_improvement*100:.1f}%)\n")
+            f.write(f"  Min:  {min_improvement:+.3f} ({min_improvement*100:+.1f}%)\n")
+            f.write(f"  Max:  {max_improvement:+.3f} ({max_improvement*100:+.1f}%)\n\n")
+            
+            f.write(f"Individual values:\n")
+            f.write(f"Item\t\tCorrected\tDegraded\tImprovement\n")
+            f.write(f"{'='*60}\n")
+            for i, (item_dir, iou_c, iou_d, imp) in enumerate(zip(item_dirs[:len(iou_corrected_values)], iou_corrected_values, iou_degraded_values, improvement_values)):
+                f.write(f"{item_dir.name}\t{iou_c:.3f} ({iou_c*100:.1f}%)\t{iou_d:.3f} ({iou_d*100:.1f}%)\t{imp:+.3f} ({imp*100:+.1f}%)\n")
         
         logger.info(f"IoU statistics saved to: {stats_path}")
     
