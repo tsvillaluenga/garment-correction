@@ -289,10 +289,15 @@ class DualInputSegmentationUNet(nn.Module):
         # Decoder (uses on_model encoder features for skip connections)
         self.decoder = nn.ModuleList()
         for i in range(depth):
+            in_ch = channels[depth - i]
+            out_ch = channels[depth - i - 1]
+            skip_ch = channels[depth - i - 1]  # Skip connection channels
+            
             self.decoder.append(
                 UpBlock(
-                    channels[depth - i] + channels[depth - i - 1],  # Concat with skip
-                    channels[depth - i - 1],
+                    in_channels=in_ch,
+                    out_channels=out_ch,
+                    skip_channels=skip_ch,
                     use_bn=use_bn,
                     activation=activation,
                     upsample_mode=upsample_mode
