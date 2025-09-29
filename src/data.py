@@ -300,20 +300,54 @@ def apply_light_degradation(
         # Note: scikit-image doesn't have HSL, so we'll use HSV and modify V to behave like L
         hsv = color.rgb2hsv(image)
         
-        # Apply shifts with H fixed or minimal variation, S and L with more variation
-        h_shift = np.random.uniform(-0.5/360, 0.5/360) * magnitude  # ±0.5 degrees (minimal)
-        s_shift = np.random.uniform(-0.15, 0.15) * magnitude        # ±15% (increased variation)
-        l_shift = np.random.uniform(-0.15, 0.15) * magnitude        # ±15% (increased variation)
+        # Apply shifts with H fixed or minimal variation, S and L with MORE variation
+        h_shift = np.random.uniform(-5.0/360, 5.0/360) * magnitude  # ±5 degrees (more visible)
+        s_shift = np.random.uniform(-0.8, 0.8) * magnitude          # ±80% (very strong variation)
+        l_shift = np.random.uniform(-0.6, 0.6) * magnitude          # ±60% (very strong variation)
+        
+        # Debug: Print mask info and degradation values
+        mask_pixels = np.sum(mask_bool)
+        total_pixels = mask_bool.size
+        mask_percentage = (mask_pixels / total_pixels) * 100
+        
+        print(f"🎨 HSL degradation - Mask: {mask_percentage:.1f}% ({mask_pixels}/{total_pixels} pixels)")
+        print(f"   H shift: {h_shift*360:.2f}° | S shift: {s_shift*100:.1f}% | L shift: {l_shift*100:.1f}%")
+        
+        if mask_pixels == 0:
+            print("⚠️  WARNING: Mask is empty! No degradation will be applied.")
+            return image.copy()
         
         hsv_degraded = hsv.copy()
+        
+        # Store original values for comparison
+        orig_h = hsv[mask_bool, 0].copy()
+        orig_s = hsv[mask_bool, 1].copy() 
+        orig_v = hsv[mask_bool, 2].copy()
+        
         # H: minimal variation (keep hue mostly fixed)
         hsv_degraded[mask_bool, 0] = np.clip(hsv_degraded[mask_bool, 0] + h_shift, 0, 1)
-        # S: more variation (saturation changes)
-        hsv_degraded[mask_bool, 1] = np.clip(hsv_degraded[mask_bool, 1] + s_shift, 0, 1)
-        # V: more variation (lightness changes, using V as proxy for L)
-        hsv_degraded[mask_bool, 2] = np.clip(hsv_degraded[mask_bool, 2] + l_shift, 0, 1)
+        # S: strong variation (saturation changes) - less aggressive clipping
+        new_s = hsv_degraded[mask_bool, 1] + s_shift
+        hsv_degraded[mask_bool, 1] = np.clip(new_s, 0.1, 0.9)  # Keep some saturation
+        # V: strong variation (lightness changes) - less aggressive clipping  
+        new_v = hsv_degraded[mask_bool, 2] + l_shift
+        hsv_degraded[mask_bool, 2] = np.clip(new_v, 0.1, 0.9)  # Avoid pure black/white
+        
+        # Show actual changes applied
+        actual_h_change = np.mean(np.abs(hsv_degraded[mask_bool, 0] - orig_h)) * 360
+        actual_s_change = np.mean(np.abs(hsv_degraded[mask_bool, 1] - orig_s)) * 100
+        actual_v_change = np.mean(np.abs(hsv_degraded[mask_bool, 2] - orig_v)) * 100
+        
+        print(f"   Actual changes: H={actual_h_change:.2f}°, S={actual_s_change:.1f}%, V={actual_v_change:.1f}%")
         
         degraded = color.hsv2rgb(hsv_degraded)
+        
+        # Final verification - check if image actually changed
+        diff = np.mean(np.abs(degraded - image))
+        print(f"   Image difference: {diff:.6f} (0=no change, >0.01=visible)")
+        
+        if diff < 0.001:
+            print("⚠️  WARNING: Very little change detected! Degradation may not be visible.")
         
     elif mode == "lab":
         # Convert to LAB

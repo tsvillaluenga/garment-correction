@@ -21,12 +21,12 @@ def parse_args():
     parser.add_argument("--data_root", type=str, required=True, help="Path to test dataset")
     parser.add_argument("--mode", type=str, default="lab", choices=["hsv", "hsl", "lab", "rgb"], 
                        help="Degradation mode")
-    parser.add_argument("--magnitude", type=float, default=0.04, help="Degradation magnitude")
+    parser.add_argument("--magnitude", type=float, default=0.16, help="Degradation magnitude (default: 0.16 for visible effect)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--skip_if_exists", action="store_true", 
                        help="Skip items that already have degraded images")
     parser.add_argument("--output_dir", type=str, help="Output directory (default: same as input)")
-    parser.add_argument("--output_size", type=int, default=512, help="Output image size")
+    parser.add_argument("--output_size", type=int, default=1024, help="Output image size (default: 1024)")
     return parser.parse_args()
 
 

@@ -22,16 +22,16 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Recolor garments using trained model")
     parser.add_argument("--data_root", type=str, required=True, help="Path to test dataset")
     parser.add_argument("--ckpt", type=str, required=True, help="Checkpoint for recoloring model")
-    parser.add_argument("--img_size", type=int, default=512, help="Image size for processing")
+    parser.add_argument("--img_size", type=int, default=512, help="Image size for processing (model input)")
     parser.add_argument("--device", type=str, help="Device to use (cuda/cpu)")
     parser.add_argument("--use_degraded", action="store_true", 
                        help="Use degraded_on_model.jpg instead of on_model.jpg")
-    parser.add_argument("--min_output_size", type=int, default=512, 
-                       help="Minimum output image size (default: 512)")
+    parser.add_argument("--min_output_size", type=int, default=1024, 
+                       help="Minimum output image size (default: 1024)")
     parser.add_argument("--config", type=str, help="Path to model config file (optional)")
     parser.add_argument("--overwrite", action="store_true", 
                        help="Overwrite existing output files")
-    parser.add_argument("--output_size", type=int, default=512, help="Output image size")
+    parser.add_argument("--output_size", type=int, default=1024, help="Output image size (default: 1024)")
     return parser.parse_args()
 
 
