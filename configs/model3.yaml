@@ -2,7 +2,7 @@ data_root: dataset
 img_size: 512
 train:
   batch_size: 8  # Reduced for stability with complex augmentations
-  epochs: 60  # Increased for better convergence
+  epochs: 85  # Increased for better convergence
   lr: 0.00003  # More conservative LR
   weight_decay: 0.0005  # Increased regularization
   amp: true
