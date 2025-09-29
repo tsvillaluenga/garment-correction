@@ -14,10 +14,16 @@ This project implements a three-model pipeline:
 
 - **Cross-attention mechanism** with 2D sinusoidal positional encoding
 - **Color-accurate loss functions** including Delta E 1976 and perceptual losses
-- **Light degradation simulation** for robust training
+- **Light degradation simulation** for robust training (HSV, LAB, RGB modes)
 - **Comprehensive evaluation metrics** including CIEDE2000, SSIM, and PSNR
 - **Production-ready CLI tools** for training and inference
 - **Extensive test coverage** for all components
+- **Advanced data augmentation** with Albumentations for segmentation models
+- **Dual-input segmentation** with cross-attention for improved on-model segmentation
+- **Progressive learning rate scheduling** and early stopping
+- **High-resolution output** (1024x1024) with intelligent upsampling
+- **Hybrid checkpoint saving** based on multiple metrics
+- **Training visualization** with automatic plot generation
 
 ## Installation
 
@@ -26,6 +32,7 @@ This project implements a three-model pipeline:
 - Python 3.10+
 - PyTorch ≥ 2.2
 - CUDA-compatible GPU (recommended)
+- Additional dependencies: numpy, opencv-python, scikit-image, einops, pyyaml, rich, tqdm, pytest, seaborn, scipy, Pillow, albumentations
 
 ### Setup
 
@@ -93,32 +100,29 @@ python -m src.cli.train_model1 --config configs/model1.yaml
 The inference pipeline consists of three steps:
 
 ```bash
-# Step 1: Generate masks for test images
+# Step 1: Generate masks for test images (output: 1024x1024)
 python -m src.cli.infer_masks \
     --data_root dataset/test \
-    --ckpt_still runs/model2_seg_still/best.pth \
-    --ckpt_onmodel runs/model3_seg_onmodel/best.pth \
-    --img_size 512 --thresh 0.5
+    --ckpt_still runs/model2_seg_still/train_20250927_070746/best.pth \
+    --ckpt_onmodel runs/model3_seg_onmodel/train_20250929_080636/best.pth \
+    --overwrite
 
-# Step 2: Create degraded on-model images
+# Step 2: Create degraded on-model images (output: 1024x1024)
 python -m src.cli.degrade_on_model \
     --data_root dataset/test \
-    --mode lab --magnitude 0.04 \
-    --skip_if_exists
+    --mode hsl --magnitude 0.20
 
-# Step 3: Generate corrected images
+# Step 3: Generate corrected images (output: 1024x1024)
 python -m src.cli.infer_recolor \
     --data_root dataset/test \
-    --ckpt_model1 runs/model1_recolor/best.pth \
-    --img_size 512 \
-    --save_dir results/test \
-    --use_degraded
+    --ckpt runs/model1_recolor/train_20250925_234945/best.pth \
+    --config configs/model1.yaml \
+    --use_degraded --overwrite
 
-# Step 4: Evaluate results
-python -m src.cli.evaluate_corrected \
+# Step 4: Visualize results (optional)
+python -m src.cli.visualize_results \
     --data_root dataset/test \
-    --results_dir results/test \
-    --save_csv results/metrics.csv
+    --output_dir results/visualizations
 ```
 
 ## Configuration
@@ -129,29 +133,39 @@ python -m src.cli.evaluate_corrected \
 data_root: dataset
 img_size: 512
 train:
-  batch_size: 8
+  batch_size: 4
   epochs: 60
-  lr: 1.0e-4
-  weight_decay: 0.0
+  lr: 0.00005
+  weight_decay: 0.0001
   amp: true
-  num_workers: 8
+  num_workers: 2
   seed: 42
 model:
-  base_channels: 64
-  num_attn_blocks: 2
-  num_heads: 4
+  base_channels: 96
+  num_attn_blocks: 3
+  num_heads: 8
   use_gan: false
 loss_weights:
   w_l1: 1.0
-  w_de: 1.0
-  w_perc: 0.1
+  w_de: 0.5
+  w_perc: 0.01
   w_gan: 0.0
 degrade:
   enable: true
-  mode: lab
-  magnitude: 0.04
+  mode: mixed
+  magnitude: 0.06
 val:
-  every_n_epochs: 1
+  every_n_epochs: 2
+scheduler:
+  type: "cosine_annealing"
+  T_max: 60
+  eta_min: 0.00001
+early_stopping:
+  enabled: true
+  patience: 15
+  min_delta: 0.001
+  mode: "min"
+  restore_best_weights: true
 save_dir: runs/model1_recolor
 ```
 
@@ -161,21 +175,47 @@ save_dir: runs/model1_recolor
 data_root: dataset
 img_size: 512
 train:
-  batch_size: 8
-  epochs: 50
-  lr: 1.0e-4
-  weight_decay: 0.0
+  batch_size: 16
+  epochs: 30
+  lr: 0.0001
+  weight_decay: 0.0001
   amp: true
-  num_workers: 8
+  num_workers: 4
   seed: 42
+model:
+  type: "enhanced"  # or "dual_input" for Model 3
+  base_channels: 96
+  use_attention: true
+  dropout: 0.2
 seg:
-  threshold: 0.5
+  threshold: 0.4
 augment:
   hflip: true
-  rotate_deg: 5
-  scale: [0.95, 1.05]
+  rotate_deg: 15
+  scale: [0.8, 1.2]
+  brightness: [0.8, 1.2]
+  contrast: [0.8, 1.2]
+  elastic_transform: true
+  grid_distortion: true
+  perspective_transform: true
+  hue_shift: true
+  saturation_shift: true
+  gaussian_noise: true
+  cutout: true
+  mixup: true
+  random_erasing: true
 val:
-  every_n_epochs: 1
+  every_n_epochs: 2
+scheduler:
+  type: "cosine_annealing"
+  T_max: 30
+  eta_min: 0.00001
+early_stopping:
+  enabled: true
+  patience: 8
+  min_delta: 0.001
+  mode: "max"
+  restore_best_weights: true
 save_dir: runs/model2_seg_still  # or runs/model3_seg_onmodel
 ```
 
@@ -190,9 +230,11 @@ save_dir: runs/model2_seg_still  # or runs/model3_seg_onmodel
 
 ### Models 2 & 3: Segmentation U-Net
 
-- **Lightweight U-Net** architecture optimized for binary segmentation
-- **Combined BCE + Dice loss** for robust training
-- **Data augmentation** including horizontal flips, rotation, and scaling
+- **Enhanced U-Net** with spatial attention in bottleneck and skip connections
+- **Dual-input architecture** (Model 3) with cross-attention for improved on-model segmentation
+- **Advanced loss functions** including BCE, Dice, Focal, Tversky, and Boundary losses
+- **Comprehensive data augmentation** with Albumentations (elastic transforms, perspective, noise, etc.)
+- **Multi-task learning** for dual-input models (main + auxiliary segmentation)
 - **Post-processing** with configurable thresholding
 
 ## Loss Functions
@@ -210,9 +252,21 @@ L = w_l1 * L1_masked + w_de * ΔE76_masked + w_perc * Perceptual_luma + w_gan * 
 
 ### Segmentation Loss (Models 2 & 3)
 
+**Basic Models:**
 ```
 L = BCE(logits, target) + Dice(sigmoid(logits), target)
 ```
+
+**Enhanced Models:**
+```
+L = w_bce * BCE + w_dice * Dice + w_focal * Focal + w_tversky * Tversky + w_boundary * Boundary
+```
+
+**Dual-Input Models (Model 3):**
+```
+L = w_main * L_main + w_aux * L_aux
+```
+Where each component loss includes all advanced loss functions.
 
 ## Evaluation Metrics
 
@@ -263,6 +317,8 @@ The system applies controlled degradation to on-model images during training to 
 - **HSV mode**: ±2° hue, ±3% saturation/value
 - **LAB mode**: ±2 L*, ±1.5 a*/b*
 - **RGB mode**: ±4/255 per channel
+- **HSL mode**: ±5° hue, ±80% saturation, ±60% lightness (enhanced)
+- **Mixed mode**: Combines multiple degradation types for maximum robustness
 
 ### Cross-Attention with Positional Encoding
 
@@ -281,6 +337,11 @@ pos_embed = concat([pos_h, pos_w])
 - **Gradient checkpointing** available for large models
 - **Efficient data loading** with configurable workers
 - **GPU memory optimization** through careful tensor management
+- **Progressive learning rate scheduling** with cosine annealing, step, and exponential decay
+- **Early stopping** to prevent overfitting and save training time
+- **Hybrid checkpoint saving** based on multiple metrics (Delta E, total loss)
+- **Training visualization** with automatic plot generation and timestamped directories
+- **High-resolution inference** with intelligent upsampling from 512x512 to 1024x1024
 
 ## Troubleshooting
 
@@ -301,12 +362,34 @@ pos_embed = concat([pos_h, pos_w])
    - Increase gradient clipping
    - Check loss weight balance
 
+4. **Model parameter mismatch in inference**
+   - Use `--config` flag to specify model configuration
+   - Check that checkpoint matches model architecture
+   - Verify model type (basic/enhanced/dual_input)
+
+5. **Low segmentation IoU**
+   - Increase data augmentation intensity
+   - Adjust loss weights (increase boundary weight)
+   - Use dual-input architecture for Model 3
+   - Increase training epochs with early stopping
+
+6. **HSL degradation not visible**
+   - Increase magnitude (default: 0.20)
+   - Check mask coverage percentage
+   - Verify degradation is applied to correct regions
+
 ### Performance Tips
 
 - Use **SSD storage** for datasets to improve I/O
 - Set `num_workers` based on CPU cores (typically 4-8)
 - Enable `pin_memory=True` for faster GPU transfers
 - Use **AMP** for ~30% speedup on modern GPUs
+- **Enable early stopping** to save training time
+- **Use progressive learning rate scheduling** for better convergence
+- **Monitor training plots** to identify overfitting early
+- **Use hybrid checkpoint saving** for better model selection
+- **Enable data augmentation** for improved generalization
+- **Use dual-input architecture** for challenging segmentation tasks
 
 ## Citation
 
@@ -338,4 +421,7 @@ This project is licensed under the MIT License. See `LICENSE` file for details.
 - PyTorch team for the excellent deep learning framework
 - scikit-image for color space conversion utilities
 - Rich library for beautiful CLI interfaces
+- Albumentations for advanced data augmentation
 - The computer vision community for foundational research in image-to-image translation
+- U-Net architecture for semantic segmentation
+- Attention mechanisms for cross-modal learning

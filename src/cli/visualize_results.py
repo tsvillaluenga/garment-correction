@@ -18,6 +18,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from data import load_image, load_mask
 from utils import setup_logging
+from losses_metrics import compute_iou
 
 
 def parse_args():
@@ -78,10 +79,51 @@ def create_comparison_grid(item_dir: Path, grid_size: int = 256) -> np.ndarray:
     return grid
 
 
+def compute_image_iou(img1_path: Path, img2_path: Path, grid_size: int) -> float:
+    """Compute IoU between two images by converting them to binary masks."""
+    try:
+        # Load images
+        img1 = load_and_resize_image(img1_path, grid_size)
+        img2 = load_and_resize_image(img2_path, grid_size)
+        
+        # Convert to grayscale
+        gray1 = cv2.cvtColor(img1, cv2.COLOR_RGB2GRAY)
+        gray2 = cv2.cvtColor(img2, cv2.COLOR_RGB2GRAY)
+        
+        # Create binary masks (assuming non-black pixels are foreground)
+        # Use a threshold to separate foreground from background
+        _, mask1 = cv2.threshold(gray1, 10, 255, cv2.THRESH_BINARY)
+        _, mask2 = cv2.threshold(gray2, 10, 255, cv2.THRESH_BINARY)
+        
+        # Convert to binary (0/1)
+        mask1 = (mask1 > 0).astype(np.uint8)
+        mask2 = (mask2 > 0).astype(np.uint8)
+        
+        # Compute IoU
+        intersection = np.logical_and(mask1, mask2).sum()
+        union = np.logical_or(mask1, mask2).sum()
+        
+        if union == 0:
+            return 1.0  # Both images are empty
+        
+        iou = intersection / union
+        return float(iou)
+        
+    except Exception as e:
+        print(f"Error computing IoU for {img1_path} vs {img2_path}: {e}")
+        return 0.0
+
+
 def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: int = 14) -> np.ndarray:
-    """Create a labeled comparison image using matplotlib."""
+    """Create a labeled comparison image using matplotlib with IoU calculation."""
     # Create the grid
     grid = create_comparison_grid(item_dir, grid_size)
+    
+    # Compute IoU between on_model and corrected images
+    on_model_path = item_dir / "on_model.jpg"
+    corrected_path = item_dir / "corrected-on-model.jpg"
+    iou_value = compute_image_iou(on_model_path, corrected_path, grid_size)
+    iou_percentage = iou_value * 100
     
     # Create matplotlib figure
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
@@ -117,7 +159,13 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
                         edgecolor=border_color, facecolor='none')
         ax.add_patch(rect)
     
+    # Add IoU information at the bottom
+    fig.text(0.5, 0.02, f'IoU Similarity: {iou_percentage:.1f}%', 
+             ha='center', va='bottom', fontsize=font_size+2, fontweight='bold',
+             bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.8))
+    
     plt.tight_layout()
+    plt.subplots_adjust(bottom=0.1)  # Make room for IoU text
     
     # Convert matplotlib figure to numpy array
     fig.canvas.draw()
@@ -189,8 +237,8 @@ def create_summary_grid(item_dirs: list, output_path: Path, rows: int = 4, cols:
     print(f"Summary grid saved: {output_path}")
 
 
-def process_item(item_dir: Path, output_dir: Path, grid_size: int, font_size: int) -> bool:
-    """Process a single item and create comparison image."""
+def process_item(item_dir: Path, output_dir: Path, grid_size: int, font_size: int) -> tuple[bool, float]:
+    """Process a single item and create comparison image with IoU."""
     try:
         # Create labeled comparison
         comparison_img = create_labeled_comparison(item_dir, grid_size, font_size)
@@ -202,11 +250,16 @@ def process_item(item_dir: Path, output_dir: Path, grid_size: int, font_size: in
         comparison_bgr = cv2.cvtColor(comparison_img, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(output_path), comparison_bgr)
         
-        return True
+        # Compute IoU for return value
+        on_model_path = item_dir / "on_model.jpg"
+        corrected_path = item_dir / "corrected-on-model.jpg"
+        iou_value = compute_image_iou(on_model_path, corrected_path, grid_size)
+        
+        return True, iou_value
         
     except Exception as e:
         print(f"Error processing {item_dir.name}: {e}")
-        return False
+        return False, 0.0
 
 
 def main():
@@ -247,17 +300,46 @@ def main():
     # Process items
     successful = 0
     failed = 0
+    iou_values = []
     
     for item_dir in tqdm(item_dirs, desc="Creating visualizations"):
-        success = process_item(item_dir, output_dir, args.grid_size, args.font_size)
+        success, iou = process_item(item_dir, output_dir, args.grid_size, args.font_size)
         if success:
             successful += 1
+            iou_values.append(iou)
         else:
             failed += 1
     
     logger.info(f"Successfully created {successful} visualizations")
     if failed > 0:
         logger.warning(f"Failed to create {failed} visualizations")
+    
+    # Print IoU statistics
+    if iou_values:
+        mean_iou = np.mean(iou_values)
+        std_iou = np.std(iou_values)
+        min_iou = np.min(iou_values)
+        max_iou = np.max(iou_values)
+        
+        logger.info(f"IoU Statistics:")
+        logger.info(f"  Mean: {mean_iou:.3f} ({mean_iou*100:.1f}%)")
+        logger.info(f"  Std:  {std_iou:.3f} ({std_iou*100:.1f}%)")
+        logger.info(f"  Min:  {min_iou:.3f} ({min_iou*100:.1f}%)")
+        logger.info(f"  Max:  {max_iou:.3f} ({max_iou*100:.1f}%)")
+        
+        # Save IoU statistics to file
+        stats_path = output_dir / "iou_statistics.txt"
+        with open(stats_path, 'w') as f:
+            f.write(f"IoU Statistics for {len(iou_values)} items:\n")
+            f.write(f"Mean: {mean_iou:.3f} ({mean_iou*100:.1f}%)\n")
+            f.write(f"Std:  {std_iou:.3f} ({std_iou*100:.1f}%)\n")
+            f.write(f"Min:  {min_iou:.3f} ({min_iou*100:.1f}%)\n")
+            f.write(f"Max:  {max_iou:.3f} ({max_iou*100:.1f}%)\n")
+            f.write(f"\nIndividual IoU values:\n")
+            for i, (item_dir, iou) in enumerate(zip(item_dirs[:len(iou_values)], iou_values)):
+                f.write(f"{item_dir.name}: {iou:.3f} ({iou*100:.1f}%)\n")
+        
+        logger.info(f"IoU statistics saved to: {stats_path}")
     
     # Create summary grid if requested
     if args.create_summary and successful > 0:
