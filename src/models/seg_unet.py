@@ -275,7 +275,9 @@ class DualInputSegmentationUNet(nn.Module):
         if use_attention:
             from .attention import CrossAttentionBlock
             self.cross_attention = CrossAttentionBlock(
-                channels[depth], channels[depth], num_heads=8, dropout=dropout
+                embed_dim=channels[depth], 
+                num_heads=8, 
+                dropout=dropout
             )
         
         # Bottleneck processing
