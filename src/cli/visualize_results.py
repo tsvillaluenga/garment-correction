@@ -18,7 +18,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from data import load_image, load_mask
 from utils import setup_logging
-from losses_metrics import compute_iou
 
 
 def parse_args():
