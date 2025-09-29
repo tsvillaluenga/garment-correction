@@ -307,8 +307,22 @@ class DualInputSegmentationUNet(nn.Module):
         # Final convolution
         self.final_conv = nn.Conv2d(channels[0], 1, kernel_size=1)
         
-        # Auxiliary head for still segmentation (optional)
-        self.aux_head = nn.Conv2d(channels[depth], 1, kernel_size=1)
+        # Auxiliary decoder for still segmentation (simpler version)
+        self.aux_decoder = nn.Sequential(
+            nn.ConvTranspose2d(channels[depth], channels[depth//2], 4, 2, 1),  # 32x32 -> 64x64
+            nn.BatchNorm2d(channels[depth//2]) if use_bn else nn.Identity(),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(channels[depth//2], channels[depth//4], 4, 2, 1),  # 64x64 -> 128x128
+            nn.BatchNorm2d(channels[depth//4]) if use_bn else nn.Identity(),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(channels[depth//4], channels[depth//8], 4, 2, 1),  # 128x128 -> 256x256
+            nn.BatchNorm2d(channels[depth//8]) if use_bn else nn.Identity(),
+            nn.ReLU(inplace=True),
+            nn.ConvTranspose2d(channels[depth//8], channels[0], 4, 2, 1),  # 256x256 -> 512x512
+            nn.BatchNorm2d(channels[0]) if use_bn else nn.Identity(),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(channels[0], 1, kernel_size=1)  # Final prediction
+        )
     
     def _create_encoder(self, in_channels, channels, use_bn, activation):
         """Create encoder layers."""
@@ -393,7 +407,7 @@ class DualInputSegmentationUNet(nn.Module):
         x = self.dropout(x)
         
         # Auxiliary prediction for still image (for multi-task learning)
-        aux_pred = self.aux_head(still_bottleneck)
+        aux_pred = self.aux_decoder(still_bottleneck)
         
         # Decoder with skip connections from on_model encoder
         for i, up_block in enumerate(self.decoder):
