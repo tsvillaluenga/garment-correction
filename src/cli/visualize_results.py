@@ -79,7 +79,7 @@ def create_comparison_grid(item_dir: Path, grid_size: int = 256) -> np.ndarray:
 
 
 def compute_masked_similarity(img1_path: Path, img2_path: Path, mask_path: Path, grid_size: int) -> float:
-    """Compute similarity between two images only in masked regions."""
+    """Compute comprehensive pixel-by-pixel similarity between two images only in masked regions."""
     try:
         # Load images
         img1 = load_and_resize_image(img1_path, grid_size)
@@ -88,41 +88,105 @@ def compute_masked_similarity(img1_path: Path, img2_path: Path, mask_path: Path,
         # Load mask
         mask = load_mask(mask_path, (grid_size, grid_size))
         
-        # Convert images to grayscale for comparison
-        gray1 = cv2.cvtColor(img1, cv2.COLOR_RGB2GRAY)
-        gray2 = cv2.cvtColor(img2, cv2.COLOR_RGB2GRAY)
+        # Convert to float32 and normalize to [0, 1]
+        img1_float = img1.astype(np.float32) / 255.0
+        img2_float = img2.astype(np.float32) / 255.0
         
-        # Normalize to [0, 1]
-        gray1 = gray1.astype(np.float32) / 255.0
-        gray2 = gray2.astype(np.float32) / 255.0
+        # Apply mask to get only garment regions
+        masked_img1 = img1_float * mask[:, :, np.newaxis]  # Broadcast mask to 3 channels
+        masked_img2 = img2_float * mask[:, :, np.newaxis]
         
-        # Apply mask (only compare masked regions)
-        masked_gray1 = gray1 * mask
-        masked_gray2 = gray2 * mask
-        
-        # Compute similarity in masked regions only
-        # Use normalized cross-correlation
-        mask_sum = np.sum(mask)
-        if mask_sum == 0:
+        # Get mask statistics
+        mask_pixels = np.sum(mask)
+        if mask_pixels == 0:
             return 1.0  # No mask region to compare
         
-        # Mean of masked regions
-        mean1 = np.sum(masked_gray1) / mask_sum
-        mean2 = np.sum(masked_gray2) / mask_sum
+        # 1. PIXEL-BY-PIXEL COLOR DIFFERENCE (RGB)
+        # Compute absolute difference for each pixel in RGB space
+        rgb_diff = np.abs(masked_img1 - masked_img2)
+        rgb_diff_per_pixel = np.sum(rgb_diff, axis=2)  # Sum across RGB channels
         
-        # Normalized cross-correlation
-        numerator = np.sum((masked_gray1 - mean1) * (masked_gray2 - mean2))
-        denominator = np.sqrt(np.sum((masked_gray1 - mean1) ** 2) * np.sum((masked_gray2 - mean2) ** 2))
+        # Average RGB difference per pixel (normalized by number of channels)
+        avg_rgb_diff = np.sum(rgb_diff_per_pixel) / (mask_pixels * 3)
         
-        if denominator == 0:
-            return 1.0  # Both regions are constant
+        # 2. STRUCTURAL SIMILARITY (SSIM-like)
+        # Convert to grayscale for structural comparison
+        gray1 = np.mean(masked_img1, axis=2)
+        gray2 = np.mean(masked_img2, axis=2)
         
-        similarity = numerator / denominator
+        # Compute means and variances in masked regions
+        mean1 = np.sum(gray1) / mask_pixels
+        mean2 = np.sum(gray2) / mask_pixels
         
-        # Convert to [0, 1] range (NCC is in [-1, 1])
-        similarity = (similarity + 1.0) / 2.0
+        # Variance and covariance
+        var1 = np.sum((gray1 - mean1) ** 2) / mask_pixels
+        var2 = np.sum((gray2 - mean2) ** 2) / mask_pixels
+        covar = np.sum((gray1 - mean1) * (gray2 - mean2)) / mask_pixels
         
-        return float(similarity)
+        # SSIM components
+        c1, c2 = 0.01, 0.03  # Constants for numerical stability
+        ssim = ((2 * mean1 * mean2 + c1) * (2 * covar + c2)) / \
+               ((mean1**2 + mean2**2 + c1) * (var1 + var2 + c2))
+        
+        # 3. COLOR DISTRIBUTION SIMILARITY (Histogram correlation)
+        # Compute histograms for each channel in masked regions
+        hist_corr = 0.0
+        for channel in range(3):
+            hist1, _ = np.histogram(masked_img1[:, :, channel].flatten(), bins=32, range=(0, 1), weights=mask.flatten())
+            hist2, _ = np.histogram(masked_img2[:, :, channel].flatten(), bins=32, range=(0, 1), weights=mask.flatten())
+            
+            # Normalize histograms
+            hist1 = hist1 / (np.sum(hist1) + 1e-8)
+            hist2 = hist2 / (np.sum(hist2) + 1e-8)
+            
+            # Correlation coefficient between histograms
+            hist_corr += np.corrcoef(hist1, hist2)[0, 1]
+        
+        hist_corr /= 3  # Average across RGB channels
+        
+        # 4. EDGE PRESERVATION (Gradient similarity)
+        # Compute gradients using Sobel operators
+        sobel_x = np.array([[-1, 0, 1], [-2, 0, 2], [-1, 0, 1]])
+        sobel_y = np.array([[-1, -2, -1], [0, 0, 0], [1, 2, 1]])
+        
+        grad1_x = cv2.filter2D(gray1, -1, sobel_x)
+        grad1_y = cv2.filter2D(gray1, -1, sobel_y)
+        grad2_x = cv2.filter2D(gray2, -1, sobel_x)
+        grad2_y = cv2.filter2D(gray2, -1, sobel_y)
+        
+        # Gradient magnitude
+        grad1_mag = np.sqrt(grad1_x**2 + grad1_y**2)
+        grad2_mag = np.sqrt(grad2_x**2 + grad2_y**2)
+        
+        # Gradient similarity (correlation)
+        grad_corr = np.corrcoef(grad1_mag.flatten(), grad2_mag.flatten())[0, 1]
+        if np.isnan(grad_corr):
+            grad_corr = 0.0
+        
+        # 5. COMBINE ALL METRICS WITH WEIGHTS
+        # Convert differences to similarities (higher = more similar)
+        rgb_similarity = 1.0 - avg_rgb_diff  # RGB difference -> similarity
+        ssim_similarity = max(0.0, ssim)     # SSIM (already similarity)
+        hist_similarity = max(0.0, hist_corr)  # Histogram correlation
+        grad_similarity = max(0.0, grad_corr)  # Gradient correlation
+        
+        # Weighted combination (emphasize pixel-level differences)
+        weights = {
+            'rgb': 0.4,      # Pixel-by-pixel color difference (most important)
+            'ssim': 0.3,     # Structural similarity
+            'hist': 0.2,     # Color distribution
+            'grad': 0.1      # Edge preservation
+        }
+        
+        final_similarity = (weights['rgb'] * rgb_similarity + 
+                           weights['ssim'] * ssim_similarity + 
+                           weights['hist'] * hist_similarity + 
+                           weights['grad'] * grad_similarity)
+        
+        # Ensure result is in [0, 1] range
+        final_similarity = np.clip(final_similarity, 0.0, 1.0)
+        
+        return float(final_similarity)
         
     except Exception as e:
         print(f"Error computing masked similarity for {img1_path} vs {img2_path}: {e}")
