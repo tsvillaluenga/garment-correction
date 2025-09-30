@@ -78,38 +78,54 @@ def create_comparison_grid(item_dir: Path, grid_size: int = 256) -> np.ndarray:
     return grid
 
 
-def compute_image_iou(img1_path: Path, img2_path: Path, grid_size: int) -> float:
-    """Compute IoU between two images by converting them to binary masks."""
+def compute_masked_similarity(img1_path: Path, img2_path: Path, mask_path: Path, grid_size: int) -> float:
+    """Compute similarity between two images only in masked regions."""
     try:
         # Load images
         img1 = load_and_resize_image(img1_path, grid_size)
         img2 = load_and_resize_image(img2_path, grid_size)
         
-        # Convert to grayscale
+        # Load mask
+        mask = load_mask(mask_path, (grid_size, grid_size))
+        
+        # Convert images to grayscale for comparison
         gray1 = cv2.cvtColor(img1, cv2.COLOR_RGB2GRAY)
         gray2 = cv2.cvtColor(img2, cv2.COLOR_RGB2GRAY)
         
-        # Create binary masks (assuming non-black pixels are foreground)
-        # Use a threshold to separate foreground from background
-        _, mask1 = cv2.threshold(gray1, 10, 255, cv2.THRESH_BINARY)
-        _, mask2 = cv2.threshold(gray2, 10, 255, cv2.THRESH_BINARY)
+        # Normalize to [0, 1]
+        gray1 = gray1.astype(np.float32) / 255.0
+        gray2 = gray2.astype(np.float32) / 255.0
         
-        # Convert to binary (0/1)
-        mask1 = (mask1 > 0).astype(np.uint8)
-        mask2 = (mask2 > 0).astype(np.uint8)
+        # Apply mask (only compare masked regions)
+        masked_gray1 = gray1 * mask
+        masked_gray2 = gray2 * mask
         
-        # Compute IoU
-        intersection = np.logical_and(mask1, mask2).sum()
-        union = np.logical_or(mask1, mask2).sum()
+        # Compute similarity in masked regions only
+        # Use normalized cross-correlation
+        mask_sum = np.sum(mask)
+        if mask_sum == 0:
+            return 1.0  # No mask region to compare
         
-        if union == 0:
-            return 1.0  # Both images are empty
+        # Mean of masked regions
+        mean1 = np.sum(masked_gray1) / mask_sum
+        mean2 = np.sum(masked_gray2) / mask_sum
         
-        iou = intersection / union
-        return float(iou)
+        # Normalized cross-correlation
+        numerator = np.sum((masked_gray1 - mean1) * (masked_gray2 - mean2))
+        denominator = np.sqrt(np.sum((masked_gray1 - mean1) ** 2) * np.sum((masked_gray2 - mean2) ** 2))
+        
+        if denominator == 0:
+            return 1.0  # Both regions are constant
+        
+        similarity = numerator / denominator
+        
+        # Convert to [0, 1] range (NCC is in [-1, 1])
+        similarity = (similarity + 1.0) / 2.0
+        
+        return float(similarity)
         
     except Exception as e:
-        print(f"Error computing IoU for {img1_path} vs {img2_path}: {e}")
+        print(f"Error computing masked similarity for {img1_path} vs {img2_path}: {e}")
         return 0.0
 
 
@@ -118,16 +134,17 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
     # Create the grid
     grid = create_comparison_grid(item_dir, grid_size)
     
-    # Compute IoU between on_model and corrected images
+    # Compute similarity between on_model and corrected/degraded images using mask
     on_model_path = item_dir / "on_model.jpg"
     corrected_path = item_dir / "corrected-on-model.jpg"
     degraded_path = item_dir / "degraded_on_model.jpg"
+    mask_path = item_dir / "mask_on_model.png"
     
-    iou_corrected = compute_image_iou(on_model_path, corrected_path, grid_size)
-    iou_degraded = compute_image_iou(on_model_path, degraded_path, grid_size)
+    sim_corrected = compute_masked_similarity(on_model_path, corrected_path, mask_path, grid_size)
+    sim_degraded = compute_masked_similarity(on_model_path, degraded_path, mask_path, grid_size)
     
-    iou_corrected_pct = iou_corrected * 100
-    iou_degraded_pct = iou_degraded * 100
+    sim_corrected_pct = sim_corrected * 100
+    sim_degraded_pct = sim_degraded * 100
     
     # Create matplotlib figure
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
@@ -163,13 +180,13 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
                         edgecolor=border_color, facecolor='none')
         ax.add_patch(rect)
     
-    # Add IoU information at the bottom
-    fig.text(0.5, 0.05, f'Degraded vs Original: {iou_degraded_pct:.1f}% | Corrected vs Original: {iou_corrected_pct:.1f}%', 
+    # Add similarity information at the bottom
+    fig.text(0.5, 0.05, f'Degraded vs Original: {sim_degraded_pct:.1f}% | Corrected vs Original: {sim_corrected_pct:.1f}%', 
              ha='center', va='bottom', fontsize=font_size+1, fontweight='bold',
              bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8))
     
     # Add improvement information
-    improvement = iou_corrected_pct - iou_degraded_pct
+    improvement = sim_corrected_pct - sim_degraded_pct
     improvement_color = "lightgreen" if improvement > 0 else "lightcoral"
     fig.text(0.5, 0.01, f'Improvement: {improvement:+.1f}%', 
              ha='center', va='bottom', fontsize=font_size, fontweight='bold',
@@ -261,15 +278,16 @@ def process_item(item_dir: Path, output_dir: Path, grid_size: int, font_size: in
         comparison_bgr = cv2.cvtColor(comparison_img, cv2.COLOR_RGB2BGR)
         cv2.imwrite(str(output_path), comparison_bgr)
         
-        # Compute IoU for return values
+        # Compute similarity for return values
         on_model_path = item_dir / "on_model.jpg"
         corrected_path = item_dir / "corrected-on-model.jpg"
         degraded_path = item_dir / "degraded_on_model.jpg"
+        mask_path = item_dir / "mask_on_model.png"
         
-        iou_corrected = compute_image_iou(on_model_path, corrected_path, grid_size)
-        iou_degraded = compute_image_iou(on_model_path, degraded_path, grid_size)
+        sim_corrected = compute_masked_similarity(on_model_path, corrected_path, mask_path, grid_size)
+        sim_degraded = compute_masked_similarity(on_model_path, degraded_path, mask_path, grid_size)
         
-        return True, iou_corrected, iou_degraded
+        return True, sim_corrected, sim_degraded
         
     except Exception as e:
         print(f"Error processing {item_dir.name}: {e}")
@@ -314,17 +332,17 @@ def main():
     # Process items
     successful = 0
     failed = 0
-    iou_corrected_values = []
-    iou_degraded_values = []
+    sim_corrected_values = []
+    sim_degraded_values = []
     improvement_values = []
     
     for item_dir in tqdm(item_dirs, desc="Creating visualizations"):
-        success, iou_corrected, iou_degraded = process_item(item_dir, output_dir, args.grid_size, args.font_size)
+        success, sim_corrected, sim_degraded = process_item(item_dir, output_dir, args.grid_size, args.font_size)
         if success:
             successful += 1
-            iou_corrected_values.append(iou_corrected)
-            iou_degraded_values.append(iou_degraded)
-            improvement_values.append(iou_corrected - iou_degraded)
+            sim_corrected_values.append(sim_corrected)
+            sim_degraded_values.append(sim_degraded)
+            improvement_values.append(sim_corrected - sim_degraded)
         else:
             failed += 1
     
@@ -332,19 +350,19 @@ def main():
     if failed > 0:
         logger.warning(f"Failed to create {failed} visualizations")
     
-    # Print IoU statistics
-    if iou_corrected_values:
+    # Print similarity statistics
+    if sim_corrected_values:
         # Corrected vs Original statistics
-        mean_corrected = np.mean(iou_corrected_values)
-        std_corrected = np.std(iou_corrected_values)
-        min_corrected = np.min(iou_corrected_values)
-        max_corrected = np.max(iou_corrected_values)
+        mean_corrected = np.mean(sim_corrected_values)
+        std_corrected = np.std(sim_corrected_values)
+        min_corrected = np.min(sim_corrected_values)
+        max_corrected = np.max(sim_corrected_values)
         
         # Degraded vs Original statistics
-        mean_degraded = np.mean(iou_degraded_values)
-        std_degraded = np.std(iou_degraded_values)
-        min_degraded = np.min(iou_degraded_values)
-        max_degraded = np.max(iou_degraded_values)
+        mean_degraded = np.mean(sim_degraded_values)
+        std_degraded = np.std(sim_degraded_values)
+        min_degraded = np.min(sim_degraded_values)
+        max_degraded = np.max(sim_degraded_values)
         
         # Improvement statistics
         mean_improvement = np.mean(improvement_values)
@@ -352,13 +370,13 @@ def main():
         min_improvement = np.min(improvement_values)
         max_improvement = np.max(improvement_values)
         
-        logger.info(f"IoU Statistics (Corrected vs Original):")
+        logger.info(f"Masked Similarity Statistics (Corrected vs Original):")
         logger.info(f"  Mean: {mean_corrected:.3f} ({mean_corrected*100:.1f}%)")
         logger.info(f"  Std:  {std_corrected:.3f} ({std_corrected*100:.1f}%)")
         logger.info(f"  Min:  {min_corrected:.3f} ({min_corrected*100:.1f}%)")
         logger.info(f"  Max:  {max_corrected:.3f} ({max_corrected*100:.1f}%)")
         
-        logger.info(f"IoU Statistics (Degraded vs Original):")
+        logger.info(f"Masked Similarity Statistics (Degraded vs Original):")
         logger.info(f"  Mean: {mean_degraded:.3f} ({mean_degraded*100:.1f}%)")
         logger.info(f"  Std:  {std_degraded:.3f} ({std_degraded*100:.1f}%)")
         logger.info(f"  Min:  {min_degraded:.3f} ({min_degraded*100:.1f}%)")
@@ -370,18 +388,18 @@ def main():
         logger.info(f"  Min:  {min_improvement:+.3f} ({min_improvement*100:+.1f}%)")
         logger.info(f"  Max:  {max_improvement:+.3f} ({max_improvement*100:+.1f}%)")
         
-        # Save IoU statistics to file
-        stats_path = output_dir / "iou_statistics.txt"
+        # Save similarity statistics to file
+        stats_path = output_dir / "masked_similarity_statistics.txt"
         with open(stats_path, 'w') as f:
-            f.write(f"IoU Statistics for {len(iou_corrected_values)} items:\n\n")
+            f.write(f"Masked Similarity Statistics for {len(sim_corrected_values)} items:\n\n")
             
-            f.write(f"Corrected vs Original:\n")
+            f.write(f"Corrected vs Original (masked regions only):\n")
             f.write(f"  Mean: {mean_corrected:.3f} ({mean_corrected*100:.1f}%)\n")
             f.write(f"  Std:  {std_corrected:.3f} ({std_corrected*100:.1f}%)\n")
             f.write(f"  Min:  {min_corrected:.3f} ({min_corrected*100:.1f}%)\n")
             f.write(f"  Max:  {max_corrected:.3f} ({max_corrected*100:.1f}%)\n\n")
             
-            f.write(f"Degraded vs Original:\n")
+            f.write(f"Degraded vs Original (masked regions only):\n")
             f.write(f"  Mean: {mean_degraded:.3f} ({mean_degraded*100:.1f}%)\n")
             f.write(f"  Std:  {std_degraded:.3f} ({std_degraded*100:.1f}%)\n")
             f.write(f"  Min:  {min_degraded:.3f} ({min_degraded*100:.1f}%)\n")
@@ -393,13 +411,13 @@ def main():
             f.write(f"  Min:  {min_improvement:+.3f} ({min_improvement*100:+.1f}%)\n")
             f.write(f"  Max:  {max_improvement:+.3f} ({max_improvement*100:+.1f}%)\n\n")
             
-            f.write(f"Individual values:\n")
+            f.write(f"Individual values (masked regions only):\n")
             f.write(f"Item\t\tCorrected\tDegraded\tImprovement\n")
             f.write(f"{'='*60}\n")
-            for i, (item_dir, iou_c, iou_d, imp) in enumerate(zip(item_dirs[:len(iou_corrected_values)], iou_corrected_values, iou_degraded_values, improvement_values)):
-                f.write(f"{item_dir.name}\t{iou_c:.3f} ({iou_c*100:.1f}%)\t{iou_d:.3f} ({iou_d*100:.1f}%)\t{imp:+.3f} ({imp*100:+.1f}%)\n")
+            for i, (item_dir, sim_c, sim_d, imp) in enumerate(zip(item_dirs[:len(sim_corrected_values)], sim_corrected_values, sim_degraded_values, improvement_values)):
+                f.write(f"{item_dir.name}\t{sim_c:.3f} ({sim_c*100:.1f}%)\t{sim_d:.3f} ({sim_d*100:.1f}%)\t{imp:+.3f} ({imp*100:+.1f}%)\n")
         
-        logger.info(f"IoU statistics saved to: {stats_path}")
+        logger.info(f"Masked similarity statistics saved to: {stats_path}")
     
     # Create summary grid if requested
     if args.create_summary and successful > 0:
