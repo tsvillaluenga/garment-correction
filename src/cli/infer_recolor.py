@@ -153,7 +153,7 @@ def process_item(
             
             # Use same parameters as training (from config)
             degrade_mode = "mixed"  # From model1.yaml
-            degrade_magnitude = 0.06  # From model1.yaml
+            degrade_magnitude = 0.15  # From model1.yaml (updated)
             degrade_seed = 42  # Fixed seed for reproducibility
             
             # Apply degradation to onmodel_img

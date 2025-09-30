@@ -284,9 +284,9 @@ def apply_light_degradation(
         hsv = color.rgb2hsv(image)
         
         # Apply random shifts within bounds
-        h_shift = np.random.uniform(-2/360, 2/360)  # ±2 degrees
-        s_shift = np.random.uniform(-0.03, 0.03)    # ±3%
-        v_shift = np.random.uniform(-0.03, 0.03)    # ±3%
+        h_shift = np.random.uniform(-20/360, 20/360)  # ±20 degrees
+        s_shift = np.random.uniform(-0.3, 0.3)    # ±30%
+        v_shift = np.random.uniform(-0.3, 0.3)    # ±30%
         
         hsv_degraded = hsv.copy()
         hsv_degraded[mask_bool, 0] = np.clip(hsv_degraded[mask_bool, 0] + h_shift, 0, 1)
@@ -427,17 +427,17 @@ def _apply_mixed_degradation(image: np.ndarray, mask_bool: np.ndarray, magnitude
     """Apply mixed degradation combining LAB and HSV."""
     degraded = image.copy()
     
-    # 70% LAB degradation (better for color shifts)
+    # 70% LAB degradation (better for color shifts) - STRONGER
     if np.random.random() < 0.7:
-        degraded = _apply_enhanced_lab_degradation(degraded, mask_bool, magnitude * 0.8)
+        degraded = _apply_enhanced_lab_degradation(degraded, mask_bool, magnitude * 1.2)
     
-    # 50% HSV degradation (better for saturation/brightness)
+    # 50% HSV degradation (better for saturation/brightness) - STRONGER
     if np.random.random() < 0.5:
-        degraded = _apply_enhanced_hsv_degradation(degraded, mask_bool, magnitude * 0.6)
+        degraded = _apply_enhanced_hsv_degradation(degraded, mask_bool, magnitude * 1.0)
     
-    # 30% subtle RGB noise
+    # 30% RGB noise - STRONGER
     if np.random.random() < 0.3:
-        degraded = _apply_enhanced_rgb_degradation(degraded, mask_bool, magnitude * 0.4)
+        degraded = _apply_enhanced_rgb_degradation(degraded, mask_bool, magnitude * 0.8)
     
     return degraded
 
@@ -463,10 +463,10 @@ def _apply_enhanced_hsv_degradation(image: np.ndarray, mask_bool: np.ndarray, ma
     s_field = zoom(s_field, (h/s_field.shape[0], w/s_field.shape[1]), order=1)[:h, :w]
     v_field = zoom(v_field, (h/v_field.shape[0], w/v_field.shape[1]), order=1)[:h, :w]
     
-    # Apply spatially-varying degradation
-    h_shift = h_field * magnitude * (2/360)
-    s_shift = s_field * magnitude * 0.03
-    v_shift = v_field * magnitude * 0.03
+    # Apply spatially-varying degradation (MUCH STRONGER)
+    h_shift = h_field * magnitude * (20/360)  # ±20 degrees max
+    s_shift = s_field * magnitude * 0.3       # ±30% max
+    v_shift = v_field * magnitude * 0.3       # ±30% max
     
     hsv_degraded = hsv.copy()
     hsv_degraded[mask_bool, 0] = np.clip(hsv_degraded[mask_bool, 0] + h_shift[mask_bool], 0, 1)
@@ -497,10 +497,10 @@ def _apply_enhanced_lab_degradation(image: np.ndarray, mask_bool: np.ndarray, ma
     a_field = zoom(a_field, (h/a_field.shape[0], w/a_field.shape[1]), order=1)[:h, :w]
     b_field = zoom(b_field, (h/b_field.shape[0], w/b_field.shape[1]), order=1)[:h, :w]
     
-    # Apply spatially-varying degradation
-    l_shift = l_field * magnitude * 2.0
-    a_shift = a_field * magnitude * 1.5
-    b_shift = b_field * magnitude * 1.5
+    # Apply spatially-varying degradation (MUCH STRONGER)
+    l_shift = l_field * magnitude * 20.0  # ±20 L units max
+    a_shift = a_field * magnitude * 15.0  # ±15 a units max
+    b_shift = b_field * magnitude * 15.0  # ±15 b units max
     
     lab_degraded = lab.copy()
     lab_degraded[mask_bool, 0] = np.clip(lab_degraded[mask_bool, 0] + l_shift[mask_bool], 0, 100)
@@ -514,11 +514,11 @@ def _apply_enhanced_rgb_degradation(image: np.ndarray, mask_bool: np.ndarray, ma
     """Apply RGB degradation with per-channel variation."""
     degraded = image.copy()
     
-    # Apply per-channel offset with spatial variation
+    # Apply per-channel offset with spatial variation (MUCH STRONGER)
     for c in range(3):
-        offset = np.random.uniform(-4/255, 4/255) * magnitude
+        offset = np.random.uniform(-40/255, 40/255) * magnitude  # ±40/255 max
         # Add some noise for realism
-        noise = np.random.normal(0, 0.5/255, mask_bool.shape) * magnitude
+        noise = np.random.normal(0, 5/255, mask_bool.shape) * magnitude  # 5/255 noise
         degraded[mask_bool, c] = np.clip(degraded[mask_bool, c] + offset + noise[mask_bool], 0, 1)
     
     return degraded

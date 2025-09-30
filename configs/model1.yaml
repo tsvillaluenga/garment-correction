@@ -35,7 +35,7 @@ loss_weights:
 degrade:
   enable: true
   mode: mixed
-  magnitude: 0.06
+  magnitude: 0.15  # Increased from 0.06 to 0.15 for visible degradation
 val:
   every_n_epochs: 2
 early_stopping:
