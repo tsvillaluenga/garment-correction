@@ -302,8 +302,8 @@ def apply_light_degradation(
         
         # Apply shifts with H fixed or minimal variation, S and L with MORE variation
         h_shift = np.random.uniform(-30.0/360, 30.0/360) * magnitude  # ±10 degrees (more visible)
-        s_shift = np.random.uniform(-0.3, 0.3) * magnitude          # ±80% (very strong variation)
-        l_shift = np.random.uniform(-0.3, 0.3) * magnitude          # ±60% (very strong variation)
+        s_shift = np.random.uniform(0, 0.3) * magnitude          # ±80% (very strong variation)
+        l_shift = np.random.uniform(0, 0.3) * magnitude          # ±60% (very strong variation)
         
         # Debug: Print mask info and degradation values
         mask_pixels = np.sum(mask_bool)
