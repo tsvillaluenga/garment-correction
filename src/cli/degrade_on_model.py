@@ -19,9 +19,9 @@ from utils import setup_logging
 def parse_args():
     parser = argparse.ArgumentParser(description="Create degraded on-model images")
     parser.add_argument("--data_root", type=str, required=True, help="Path to test dataset")
-    parser.add_argument("--mode", type=str, default="lab", choices=["hsv", "hsl", "lab", "rgb"], 
-                       help="Degradation mode")
-    parser.add_argument("--magnitude", type=float, default=0.30, help="Degradation magnitude (default: 0.30 for visible effect)")
+    parser.add_argument("--mode", type=str, default="mixed", choices=["hsv", "hsl", "lab", "rgb", "mixed"], 
+                       help="Degradation mode (default: mixed to match training)")
+    parser.add_argument("--magnitude", type=float, default=0.06, help="Degradation magnitude (default: 0.06 to match training)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--skip_if_exists", action="store_true", 
                        help="Skip items that already have degraded images")
@@ -84,10 +84,20 @@ def process_item(
         onmodel_img = load_image(onmodel_path)
         mask = load_mask(mask_path, (onmodel_img.shape[1], onmodel_img.shape[0]))
         
-        # Apply degradation
+        # Apply degradation with same parameters as training
         degraded_img = apply_light_degradation(
             onmodel_img, mask, mode=mode, magnitude=magnitude, seed=seed
         )
+        
+        # Debug: Print degradation info
+        print(f"🎨 Applied {mode} degradation:")
+        print(f"   Magnitude: {magnitude}")
+        print(f"   Seed: {seed}")
+        print(f"   Mask coverage: {np.mean(mask)*100:.1f}%")
+        
+        # Check if degradation was actually applied
+        diff = np.mean(np.abs(degraded_img - onmodel_img))
+        print(f"   Image difference: {diff:.6f} (0=no change, >0.01=visible)")
         
         # Save degraded image directly in the item directory
         save_image(degraded_img, degraded_path, output_size)

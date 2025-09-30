@@ -25,7 +25,7 @@ def parse_args():
     parser.add_argument("--img_size", type=int, default=512, help="Image size for processing (model input)")
     parser.add_argument("--device", type=str, help="Device to use (cuda/cpu)")
     parser.add_argument("--use_degraded", action="store_true", 
-                       help="Use degraded_on_model.jpg instead of on_model.jpg")
+                       help="Apply training-consistent degradation to on_model.jpg (recommended)")
     parser.add_argument("--min_output_size", type=int, default=1024, 
                        help="Minimum output image size (default: 1024)")
     parser.add_argument("--config", type=str, help="Path to model config file (optional)")
@@ -139,9 +139,43 @@ def process_item(
         mask_still = load_mask(mask_still_path, (img_size, img_size))
         mask_onmodel = load_mask(mask_onmodel_path, (img_size, img_size))
         
+        # Debug: Print file info
+        print(f"📁 Processing {item_dir.name}:")
+        print(f"   Still: {still_path.name} ({still_img.shape})")
+        print(f"   On-model: {onmodel_path.name} ({onmodel_img.shape})")
+        print(f"   Mask still: {mask_still_path.name} (coverage: {np.mean(mask_still)*100:.1f}%)")
+        print(f"   Mask on-model: {mask_onmodel_path.name} (coverage: {np.mean(mask_onmodel)*100:.1f}%)")
+        
+        # CRITICAL FIX: Apply same degradation as training for consistency
+        if use_degraded:
+            print(f"🔧 Applying training-consistent degradation...")
+            from src.data import apply_light_degradation
+            
+            # Use same parameters as training (from config)
+            degrade_mode = "mixed"  # From model1.yaml
+            degrade_magnitude = 0.06  # From model1.yaml
+            degrade_seed = 42  # Fixed seed for reproducibility
+            
+            # Apply degradation to onmodel_img
+            onmodel_input = apply_light_degradation(
+                onmodel_img, mask_onmodel,
+                mode=degrade_mode,
+                magnitude=degrade_magnitude,
+                seed=degrade_seed
+            )
+            
+            # Debug: Check degradation
+            degrade_diff = np.mean(np.abs(onmodel_input - onmodel_img))
+            print(f"   Degradation applied: {degrade_mode}, magnitude={degrade_magnitude}")
+            print(f"   Degradation difference: {degrade_diff:.6f}")
+        else:
+            # Use original image as input
+            onmodel_input = onmodel_img
+            print(f"⚠️  Using original image (no degradation) - may cause poor results!")
+        
         # Convert to tensors
         still_tensor = torch.from_numpy(still_img).permute(2, 0, 1).unsqueeze(0).to(device)
-        onmodel_tensor = torch.from_numpy(onmodel_img).permute(2, 0, 1).unsqueeze(0).to(device)
+        onmodel_tensor = torch.from_numpy(onmodel_input).permute(2, 0, 1).unsqueeze(0).to(device)  # Use degraded input
         mask_still_tensor = torch.from_numpy(mask_still).unsqueeze(0).unsqueeze(0).to(device)
         mask_onmodel_tensor = torch.from_numpy(mask_onmodel).unsqueeze(0).unsqueeze(0).to(device)
         
@@ -150,12 +184,33 @@ def process_item(
             corrected = model.forward_infer(
                 onmodel_tensor, still_tensor, mask_onmodel_tensor, mask_still_tensor
             )
+            
+            # Debug: Check if model is actually making changes
+            input_diff = torch.mean(torch.abs(corrected - onmodel_tensor)).item()
+            print(f"🔍 Model prediction difference: {input_diff:.6f} (0=no change, >0.01=visible change)")
+            
+            # Check mask coverage
+            mask_coverage = torch.mean(mask_onmodel_tensor).item()
+            print(f"🎭 Mask coverage: {mask_coverage:.3f} ({mask_coverage*100:.1f}% of image)")
+            
+            # Check if prediction is different from input in masked regions
+            masked_diff = torch.mean(torch.abs(corrected - onmodel_tensor) * mask_onmodel_tensor).item()
+            print(f"🎯 Masked region difference: {masked_diff:.6f}")
         
         # Convert back to numpy
         corrected_img = tensor_to_image(corrected)
         
         # Save result
         save_image(corrected_img, output_path, min_output_size, output_size)
+        
+        # Debug: Final comparison
+        original_diff = np.mean(np.abs(corrected_img - onmodel_img))  # Compare with original (target)
+        input_diff = np.mean(np.abs(corrected_img - onmodel_input))   # Compare with degraded input
+        print(f"✅ Final results:")
+        print(f"   Corrected vs Original: {original_diff:.6f}")
+        print(f"   Corrected vs Degraded Input: {input_diff:.6f}")
+        print(f"💾 Saved: {output_path.name}")
+        print()
         
         return True
         
@@ -178,6 +233,14 @@ def main():
     logger.info("Loading recoloring model...")
     model = load_model(args.ckpt, device, args.config)
     logger.info("Model loaded successfully")
+    
+    # Debug: Print model architecture info
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(f"Model parameters: {total_params:,} total, {trainable_params:,} trainable")
+    
+    # Check if model is in eval mode
+    logger.info(f"Model in eval mode: {not model.training}")
     
     # Find test items
     data_root = Path(args.data_root)
