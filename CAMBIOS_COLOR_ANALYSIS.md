@@ -226,7 +226,14 @@ pip install -r requirements.txt
 
 ### Entrenar Modelo 1 con color analysis:
 ```bash
+# Entrenar con todo el dataset (100%)
 python -m src.cli.train_model1 --config configs/model1.yaml
+
+# Entrenar con 50% del dataset (para pruebas rápidas)
+python -m src.cli.train_model1 --config configs/model1.yaml --dataset_fraction 0.5
+
+# Entrenar con 10% del dataset (para debugging)
+python -m src.cli.train_model1 --config configs/model1.yaml --dataset_fraction 0.1
 ```
 
 ### El sistema ahora:

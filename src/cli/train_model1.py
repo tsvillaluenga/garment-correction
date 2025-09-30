@@ -40,6 +40,8 @@ def parse_args():
     parser.add_argument("--resume", type=str, help="Path to checkpoint to resume from")
     parser.add_argument("--device", type=str, help="Device to use (cuda/cpu)")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--dataset_fraction", type=float, default=1.0, 
+                       help="Fraction of dataset to use (0.0-1.0, default: 1.0 = 100%%)")
     return parser.parse_args()
 
 
@@ -50,7 +52,7 @@ def load_config(config_path: str) -> dict:
     return config
 
 
-def create_datasets(config: dict):
+def create_datasets(config: dict, dataset_fraction: float = 1.0):
     """Create training and validation datasets."""
     # Training dataset with degradation
     train_dataset = GarmentPairDataset(
@@ -72,6 +74,20 @@ def create_datasets(config: dict):
         degrade_params=val_degrade_params,
         augment=False
     )
+    
+    # Subset datasets if requested
+    if dataset_fraction < 1.0:
+        import random
+        
+        # Subset training dataset
+        train_size = int(len(train_dataset) * dataset_fraction)
+        train_indices = random.sample(range(len(train_dataset)), train_size)
+        train_dataset = torch.utils.data.Subset(train_dataset, train_indices)
+        
+        # Subset validation dataset
+        val_size = int(len(val_dataset) * dataset_fraction)
+        val_indices = random.sample(range(len(val_dataset)), val_size)
+        val_dataset = torch.utils.data.Subset(val_dataset, val_indices)
     
     return train_dataset, val_dataset
 
@@ -343,7 +359,11 @@ def main():
     
     # Create datasets
     logger.info("Creating datasets...")
-    train_dataset, val_dataset = create_datasets(config)
+    train_dataset, val_dataset = create_datasets(config, args.dataset_fraction)
+    
+    if args.dataset_fraction < 1.0:
+        logger.info(f"Using {args.dataset_fraction*100:.1f}% of dataset")
+    
     logger.info(f"Train dataset size: {len(train_dataset)}")
     logger.info(f"Validation dataset size: {len(val_dataset)}")
     
