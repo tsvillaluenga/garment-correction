@@ -120,7 +120,7 @@ def train_epoch(
                 if use_gan and hasattr(model, 'discriminate'):
                     fake_logits = model.discriminate(pred)
                 
-                loss_dict = criterion(pred, on_model_target, mask_on, fake_logits)
+                loss_dict = criterion(pred, on_model_target, mask_on, fake_logits, still_ref, mask_still)
                 loss = loss_dict['total']
         else:
             # Forward pass
@@ -131,7 +131,7 @@ def train_epoch(
             if use_gan and hasattr(model, 'discriminate'):
                 fake_logits = model.discriminate(pred)
             
-            loss_dict = criterion(pred, on_model_target, mask_on, fake_logits)
+            loss_dict = criterion(pred, on_model_target, mask_on, fake_logits, still_ref, mask_still)
             loss = loss_dict['total']
         
         # Backward pass
@@ -227,7 +227,7 @@ def validate_epoch(
             if use_gan and hasattr(model, 'discriminate'):
                 fake_logits = model.discriminate(pred)
             
-            loss_dict = criterion(pred, on_model_target, mask_on, fake_logits)
+            loss_dict = criterion(pred, on_model_target, mask_on, fake_logits, still_ref, mask_still)
             
             # Update loss metrics
             losses.update(loss_dict['total'].item(), still_ref.size(0))
@@ -387,7 +387,8 @@ def main():
         w_l1=loss_weights['w_l1'],
         w_de=loss_weights['w_de'],
         w_perc=loss_weights['w_perc'],
-        w_gan=loss_weights['w_gan']
+        w_gan=loss_weights['w_gan'],
+        w_color=loss_weights.get('w_color', 0.3)  # Color alignment loss
     )
     criterion.to(device)
     

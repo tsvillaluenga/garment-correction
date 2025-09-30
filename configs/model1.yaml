@@ -32,6 +32,7 @@ loss_weights:
   w_de: 0.5
   w_perc: 0.01  # Drastically reduced perceptual loss weight
   w_gan: 0.0  # Disabled with use_gan: false
+  w_color: 0.3  # Color alignment loss (explicit color matching)
 degrade:
   enable: true
   mode: mixed

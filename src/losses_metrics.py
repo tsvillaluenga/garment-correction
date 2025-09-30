@@ -399,7 +399,8 @@ class CombinedRecolorLoss(nn.Module):
         w_l1: float = 1.0,
         w_de: float = 1.0,
         w_perc: float = 0.1,
-        w_gan: float = 0.0
+        w_gan: float = 0.0,
+        w_color: float = 0.5
     ):
         super().__init__()
         
@@ -407,10 +408,12 @@ class CombinedRecolorLoss(nn.Module):
         self.w_de = w_de
         self.w_perc = w_perc
         self.w_gan = w_gan
+        self.w_color = w_color
         
         self.l1_loss = MaskedL1Loss()
         self.de_loss = MaskedDeltaE76Loss()
         self.perceptual_loss = PerceptualLoss()
+        self.color_loss = ColorAlignmentLoss() if w_color > 0 else None
         
         if w_gan > 0:
             self.gan_loss = HingeGANLoss()
@@ -421,6 +424,8 @@ class CombinedRecolorLoss(nn.Module):
         self.l1_loss = self.l1_loss.to(device)
         self.de_loss = self.de_loss.to(device)
         self.perceptual_loss = self.perceptual_loss.to(device)
+        if hasattr(self, 'color_loss') and self.color_loss is not None:
+            self.color_loss = self.color_loss.to(device)
         if hasattr(self, 'gan_loss'):
             self.gan_loss = self.gan_loss.to(device)
         return self
@@ -430,7 +435,9 @@ class CombinedRecolorLoss(nn.Module):
         pred: torch.Tensor,
         target: torch.Tensor,
         mask: torch.Tensor,
-        fake_logits: Optional[torch.Tensor] = None
+        fake_logits: Optional[torch.Tensor] = None,
+        still: Optional[torch.Tensor] = None,
+        mask_still: Optional[torch.Tensor] = None
     ) -> Dict[str, torch.Tensor]:
         """
         Compute combined recoloring loss.
@@ -462,6 +469,14 @@ class CombinedRecolorLoss(nn.Module):
         if self.w_gan > 0 and fake_logits is not None:
             losses['gan'] = self.gan_loss.generator_loss(fake_logits)
         
+        # Color alignment loss
+        if self.w_color > 0 and self.color_loss is not None and still is not None and mask_still is not None:
+            color_losses = self.color_loss(pred, target, still, mask, mask, mask_still)
+            losses['color_mean'] = color_losses['mean_color']
+            losses['color_hist'] = color_losses['histogram']
+            losses['color_dominant'] = color_losses['dominant_color']
+            losses['color_total'] = color_losses['total']
+        
         # Total loss (avoid in-place operations)
         total = 0.0
         if 'l1' in losses:
@@ -472,8 +487,107 @@ class CombinedRecolorLoss(nn.Module):
             total = total + self.w_perc * losses['perceptual']
         if 'gan' in losses:
             total = total + self.w_gan * losses['gan']
+        if 'color_total' in losses:
+            total = total + self.w_color * losses['color_total']
         
         losses['total'] = total
+        return losses
+
+
+class ColorAlignmentLoss(nn.Module):
+    """
+    Loss for explicit color alignment between still and on-model.
+    Compares color distributions in masked regions.
+    """
+    
+    def __init__(
+        self,
+        w_mean: float = 1.0,
+        w_hist: float = 0.5,
+        w_dominant: float = 0.5
+    ):
+        """
+        Args:
+            w_mean: Weight for mean color difference
+            w_hist: Weight for histogram correlation
+            w_dominant: Weight for dominant color difference
+        """
+        super().__init__()
+        self.w_mean = w_mean
+        self.w_hist = w_hist
+        self.w_dominant = w_dominant
+    
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        still: torch.Tensor,
+        mask_pred: torch.Tensor,
+        mask_target: torch.Tensor,
+        mask_still: torch.Tensor
+    ) -> Dict[str, torch.Tensor]:
+        """
+        Compute color alignment loss.
+        
+        Args:
+            pred: Predicted on-model image (B, 3, H, W)
+            target: Target on-model image (B, 3, H, W)
+            still: Still reference image (B, 3, H, W)
+            mask_pred: Mask for predicted region (B, 1, H, W)
+            mask_target: Mask for target region (B, 1, H, W)
+            mask_still: Mask for still region (B, 1, H, W)
+            
+        Returns:
+            Dictionary of losses
+        """
+        from color_analysis import ColorAnalyzer
+        
+        losses = {}
+        analyzer = ColorAnalyzer()
+        
+        # Analyze colors
+        analysis_still = analyzer.analyze_image(still, mask_still)
+        analysis_target = analyzer.analyze_image(target, mask_target)
+        analysis_pred = analyzer.analyze_image(pred, mask_pred)
+        
+        # Convert numpy to torch
+        device = pred.device
+        
+        # Mean color loss: pred should match target
+        mean_target = torch.from_numpy(analysis_target['mean_color']).float().to(device)
+        mean_pred = torch.from_numpy(analysis_pred['mean_color']).float().to(device)
+        losses['mean_color'] = torch.nn.functional.mse_loss(mean_pred, mean_target)
+        
+        # Histogram loss: pred should have similar distribution to target
+        hist_target = torch.from_numpy(analysis_target['histogram']).float().to(device)
+        hist_pred = torch.from_numpy(analysis_pred['histogram']).float().to(device)
+        
+        # Cosine similarity (higher is better, so we negate)
+        hist_sim = torch.nn.functional.cosine_similarity(
+            hist_pred.unsqueeze(0), hist_target.unsqueeze(0), dim=1
+        )
+        losses['histogram'] = 1.0 - hist_sim.mean()
+        
+        # Dominant color loss: pred should have similar dominant colors to target
+        colors_target = torch.from_numpy(analysis_target['dominant_colors']).float().to(device)
+        colors_pred = torch.from_numpy(analysis_pred['dominant_colors']).float().to(device)
+        
+        # Compare top 3 colors
+        n_compare = min(len(colors_target), len(colors_pred), 3)
+        dominant_loss = 0.0
+        for i in range(n_compare):
+            dominant_loss += torch.nn.functional.mse_loss(
+                colors_pred[i], colors_target[i]
+            )
+        losses['dominant_color'] = dominant_loss / max(n_compare, 1)
+        
+        # Total loss
+        losses['total'] = (
+            self.w_mean * losses['mean_color'] +
+            self.w_hist * losses['histogram'] +
+            self.w_dominant * losses['dominant_color']
+        )
+        
         return losses
 
 
