@@ -59,12 +59,12 @@ def process_item(
     if output_dir is None:
         output_dir = item_dir
     
-    # Check paths
-    onmodel_path = item_dir / "on_model.jpg"
+    # Check paths with fallback naming
+    onmodel_path = item_dir / "on_model.jpg" if (item_dir / "on_model.jpg").exists() else item_dir / "on-model.jpg"
     mask_path = item_dir / "mask_on_model.png"
     
     if not onmodel_path.exists():
-        print(f"Skipping {item_dir.name}: on_model.jpg not found")
+        print(f"Skipping {item_dir.name}: on_model.jpg/on-model.jpg not found")
         return False
     
     if not mask_path.exists():

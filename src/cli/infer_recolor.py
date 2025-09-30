@@ -111,9 +111,11 @@ def process_item(
     output_size: int = None
 ):
     """Process a single item directory."""
-    # Check required files
-    still_path = item_dir / "still.jpg"
+    # Check required files with fallback naming
+    still_path = item_dir / "still.jpg" if (item_dir / "still.jpg").exists() else item_dir / "still-life.jpg"
     onmodel_path = item_dir / ("degraded_on_model.jpg" if use_degraded else "on_model.jpg")
+    if not onmodel_path.exists() and not use_degraded:
+        onmodel_path = item_dir / "on-model.jpg"
     mask_still_path = item_dir / "mask_still.png"
     mask_onmodel_path = item_dir / "mask_on_model.png"
     

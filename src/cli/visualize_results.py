@@ -58,9 +58,9 @@ def load_and_resize_image(image_path: Path, target_size: int) -> np.ndarray:
 
 def create_comparison_grid(item_dir: Path, grid_size: int = 256) -> np.ndarray:
     """Create a 2x2 comparison grid for a single item."""
-    # Define image paths
-    still_path = item_dir / "still.jpg"
-    on_model_path = item_dir / "on_model.jpg"
+    # Define image paths with fallback naming
+    still_path = item_dir / "still.jpg" if (item_dir / "still.jpg").exists() else item_dir / "still-life.jpg"
+    on_model_path = item_dir / "on_model.jpg" if (item_dir / "on_model.jpg").exists() else item_dir / "on-model.jpg"
     degraded_path = item_dir / "degraded_on_model.jpg"
     corrected_path = item_dir / "corrected-on-model.jpg"
     
@@ -199,7 +199,7 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
     grid = create_comparison_grid(item_dir, grid_size)
     
     # Compute similarity between on_model and corrected/degraded images using mask
-    on_model_path = item_dir / "on_model.jpg"
+    on_model_path = item_dir / "on_model.jpg" if (item_dir / "on_model.jpg").exists() else item_dir / "on-model.jpg"
     corrected_path = item_dir / "corrected-on-model.jpg"
     degraded_path = item_dir / "degraded_on_model.jpg"
     mask_path = item_dir / "mask_on_model.png"
@@ -214,10 +214,13 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
     fig.suptitle(f'Garment Correction Results - {item_dir.name}', fontsize=font_size+2, fontweight='bold')
     
-    # Define image paths and titles
+    # Define image paths and titles with fallback naming
+    still_path = item_dir / "still.jpg" if (item_dir / "still.jpg").exists() else item_dir / "still-life.jpg"
+    on_model_path = item_dir / "on_model.jpg" if (item_dir / "on_model.jpg").exists() else item_dir / "on-model.jpg"
+    
     images_info = [
-        (item_dir / "still.jpg", "Still Product", axes[0, 0]),
-        (item_dir / "on_model.jpg", "On-Model (Ground Truth)", axes[0, 1]),
+        (still_path, "Still Product", axes[0, 0]),
+        (on_model_path, "On-Model (Ground Truth)", axes[0, 1]),
         (item_dir / "degraded_on_model.jpg", "Degraded On-Model", axes[1, 0]),
         (item_dir / "corrected-on-model.jpg", "Corrected Result", axes[1, 1])
     ]
@@ -343,7 +346,7 @@ def process_item(item_dir: Path, output_dir: Path, grid_size: int, font_size: in
         cv2.imwrite(str(output_path), comparison_bgr)
         
         # Compute similarity for return values
-        on_model_path = item_dir / "on_model.jpg"
+        on_model_path = item_dir / "on_model.jpg" if (item_dir / "on_model.jpg").exists() else item_dir / "on-model.jpg"
         corrected_path = item_dir / "corrected-on-model.jpg"
         degraded_path = item_dir / "degraded_on_model.jpg"
         mask_path = item_dir / "mask_on_model.png"

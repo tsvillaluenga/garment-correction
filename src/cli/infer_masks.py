@@ -156,9 +156,9 @@ def process_item(
     if output_dir is None:
         output_dir = item_dir
     
-    # Load images
-    still_path = item_dir / "still.jpg"
-    onmodel_path = item_dir / "on_model.jpg"
+    # Load images with fallback naming
+    still_path = item_dir / "still.jpg" if (item_dir / "still.jpg").exists() else item_dir / "still-life.jpg"
+    onmodel_path = item_dir / "on_model.jpg" if (item_dir / "on_model.jpg").exists() else item_dir / "on-model.jpg"
     
     if not still_path.exists() or not onmodel_path.exists():
         print(f"Skipping {item_dir.name}: missing images")

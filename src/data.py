@@ -109,52 +109,71 @@ def get_segmentation_transforms(augment_config: Dict, img_size: int = 512) -> A.
 
 
 def load_image(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) -> np.ndarray:
-    """Load image as RGB float32 [0, 1] with comprehensive validation."""
+    """Load image as RGB float32 [0, 1] with comprehensive validation and fallback naming."""
     path = Path(path)
     
-    # Validate path exists
-    if not path.exists():
-        raise FileNotFoundError(f"Image file not found: {path}")
+    # Try original path first
+    if path.exists() and path.is_file():
+        try:
+            img = cv2.imread(str(path), cv2.IMREAD_COLOR)
+            if img is not None and img.size > 0:
+                # Convert BGR to RGB
+                img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                
+                # Resize if requested
+                if size is not None:
+                    if not isinstance(size, (tuple, list)) or len(size) != 2:
+                        raise ValueError("Size must be (width, height) tuple")
+                    
+                    width, height = size
+                    if width <= 0 or height <= 0:
+                        raise ValueError("Size dimensions must be positive")
+                    
+                    img = cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)
+                
+                # Convert to float32 and normalize
+                img_float = img.astype(np.float32) / 255.0
+                
+                # Validate result
+                if np.isfinite(img_float).all():
+                    return img_float
+        except (cv2.error, ValueError):
+            pass  # Try fallback
     
-    if not path.is_file():
-        raise ValueError(f"Path is not a file: {path}")
+    # Fallback for still images
+    if "still.jpg" in str(path):
+        fallback_path = path.parent / "still-life.jpg"
+        if fallback_path.exists() and fallback_path.is_file():
+            try:
+                img = cv2.imread(str(fallback_path), cv2.IMREAD_COLOR)
+                if img is not None and img.size > 0:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    if size is not None:
+                        img = cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)
+                    img_float = img.astype(np.float32) / 255.0
+                    if np.isfinite(img_float).all():
+                        return img_float
+            except (cv2.error, ValueError):
+                pass
     
-    try:
-        img = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if img is None:
-            raise ValueError(f"OpenCV failed to load image: {path}")
-        
-        # Validate loaded image
-        if img.size == 0:
-            raise ValueError(f"Empty image loaded: {path}")
-        
-        # Convert BGR to RGB
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        # Resize if requested with validation
-        if size is not None:
-            if not isinstance(size, (tuple, list)) or len(size) != 2:
-                raise ValueError("Size must be (width, height) tuple")
-            
-            width, height = size
-            if width <= 0 or height <= 0:
-                raise ValueError("Size dimensions must be positive")
-            
-            img = cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)
-        
-        # Convert to float32 and normalize
-        img_float = img.astype(np.float32) / 255.0
-        
-        # Validate result
-        if not np.isfinite(img_float).all():
-            raise ValueError(f"Image contains non-finite values: {path}")
-        
-        return img_float
-        
-    except cv2.error as e:
-        raise ValueError(f"OpenCV error loading {path}: {e}")
-    except Exception as e:
-        raise ValueError(f"Unexpected error loading {path}: {e}")
+    # Fallback for on_model images
+    if "on_model.jpg" in str(path):
+        fallback_path = path.parent / "on-model.jpg"
+        if fallback_path.exists() and fallback_path.is_file():
+            try:
+                img = cv2.imread(str(fallback_path), cv2.IMREAD_COLOR)
+                if img is not None and img.size > 0:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+                    if size is not None:
+                        img = cv2.resize(img, size, interpolation=cv2.INTER_LINEAR)
+                    img_float = img.astype(np.float32) / 255.0
+                    if np.isfinite(img_float).all():
+                        return img_float
+            except (cv2.error, ValueError):
+                pass
+    
+    # If all attempts failed
+    raise FileNotFoundError(f"Image file not found: {path} (also tried fallback alternatives)")
 
 
 def load_mask(path: Union[str, Path], size: Optional[Tuple[int, int]] = None) -> np.ndarray:
@@ -579,8 +598,13 @@ class GarmentPairDataset(Dataset):
         if split_dir.exists():
             for item_dir in sorted(split_dir.iterdir()):
                 if item_dir.is_dir():
-                    required_files = ["still.jpg", "on_model.jpg", "mask_still.png", "mask_on_model.png"]
-                    if all((item_dir / f).exists() for f in required_files):
+                    # Check for required files with fallback naming
+                    still_exists = (item_dir / "still.jpg").exists() or (item_dir / "still-life.jpg").exists()
+                    onmodel_exists = (item_dir / "on_model.jpg").exists() or (item_dir / "on-model.jpg").exists()
+                    mask_still_exists = (item_dir / "mask_still.png").exists()
+                    mask_onmodel_exists = (item_dir / "mask_on_model.png").exists()
+                    
+                    if still_exists and onmodel_exists and mask_still_exists and mask_onmodel_exists:
                         self.items.append(item_dir)
         
         if not self.items:
@@ -599,9 +623,12 @@ class GarmentPairDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         item_dir = self.items[idx]
         
-        # Load images and masks
-        still = load_image(item_dir / "still.jpg", (self.img_size, self.img_size))
-        on_model = load_image(item_dir / "on_model.jpg", (self.img_size, self.img_size))
+        # Load images and masks (with fallback naming)
+        still_path = item_dir / "still.jpg" if (item_dir / "still.jpg").exists() else item_dir / "still-life.jpg"
+        onmodel_path = item_dir / "on_model.jpg" if (item_dir / "on_model.jpg").exists() else item_dir / "on-model.jpg"
+        
+        still = load_image(still_path, (self.img_size, self.img_size))
+        on_model = load_image(onmodel_path, (self.img_size, self.img_size))
         mask_still = load_mask(item_dir / "mask_still.png", (self.img_size, self.img_size))
         mask_on = load_mask(item_dir / "mask_on_model.png", (self.img_size, self.img_size))
         
@@ -675,12 +702,14 @@ class GarmentSegDataset(Dataset):
         self.target_type = target_type
         self.augment_params = augment_params or {}
         
-        # Determine file names based on target type
+        # Determine file names based on target type (with fallback naming)
         if target_type == "still":
             self.img_name = "still.jpg"
+            self.img_name_fallback = "still-life.jpg"
             self.mask_name = "mask_still.png"
         elif target_type == "on_model":
             self.img_name = "on_model.jpg"
+            self.img_name_fallback = "on-model.jpg"
             self.mask_name = "mask_on_model.png"
         else:
             raise ValueError(f"Unknown target_type: {target_type}")
@@ -691,7 +720,11 @@ class GarmentSegDataset(Dataset):
         if split_dir.exists():
             for item_dir in sorted(split_dir.iterdir()):
                 if item_dir.is_dir():
-                    if (item_dir / self.img_name).exists() and (item_dir / self.mask_name).exists():
+                    # Check for image with fallback naming
+                    img_exists = (item_dir / self.img_name).exists() or (item_dir / self.img_name_fallback).exists()
+                    mask_exists = (item_dir / self.mask_name).exists()
+                    
+                    if img_exists and mask_exists:
                         self.items.append(item_dir)
         
         if not self.items:
@@ -715,8 +748,9 @@ class GarmentSegDataset(Dataset):
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         item_dir = self.items[idx]
         
-        # Load image and mask
-        image = load_image(item_dir / self.img_name, (self.img_size, self.img_size))
+        # Load image and mask (with fallback naming)
+        img_path = item_dir / self.img_name if (item_dir / self.img_name).exists() else item_dir / self.img_name_fallback
+        image = load_image(img_path, (self.img_size, self.img_size))
         mask = load_mask(item_dir / self.mask_name, (self.img_size, self.img_size))
         
         # Convert to uint8 for albumentations (0-255 range)
@@ -766,8 +800,13 @@ class DualInputSegDataset(Dataset):
         if split_dir.exists():
             for item_dir in sorted(split_dir.iterdir()):
                 if item_dir.is_dir():
-                    required_files = ["still.jpg", "on_model.jpg", "mask_still.png", "mask_on_model.png"]
-                    if all((item_dir / f).exists() for f in required_files):
+                    # Check for required files with fallback naming
+                    still_exists = (item_dir / "still.jpg").exists() or (item_dir / "still-life.jpg").exists()
+                    onmodel_exists = (item_dir / "on_model.jpg").exists() or (item_dir / "on-model.jpg").exists()
+                    mask_still_exists = (item_dir / "mask_still.png").exists()
+                    mask_onmodel_exists = (item_dir / "mask_on_model.png").exists()
+                    
+                    if still_exists and onmodel_exists and mask_still_exists and mask_onmodel_exists:
                         self.items.append(item_dir)
         
         if not self.items:
@@ -791,9 +830,12 @@ class DualInputSegDataset(Dataset):
     def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         item_dir = self.items[idx]
         
-        # Load all images and masks
-        still = load_image(item_dir / "still.jpg", (self.img_size, self.img_size))
-        on_model = load_image(item_dir / "on_model.jpg", (self.img_size, self.img_size))
+        # Load all images and masks (with fallback naming)
+        still_path = item_dir / "still.jpg" if (item_dir / "still.jpg").exists() else item_dir / "still-life.jpg"
+        onmodel_path = item_dir / "on_model.jpg" if (item_dir / "on_model.jpg").exists() else item_dir / "on-model.jpg"
+        
+        still = load_image(still_path, (self.img_size, self.img_size))
+        on_model = load_image(onmodel_path, (self.img_size, self.img_size))
         mask_still = load_mask(item_dir / "mask_still.png", (self.img_size, self.img_size))
         mask_on_model = load_mask(item_dir / "mask_on_model.png", (self.img_size, self.img_size))
         
