@@ -460,13 +460,13 @@ def main():
         with open(stats_path, 'w') as f:
             f.write(f"Masked Similarity Statistics for {len(sim_corrected_values)} items:\n\n")
             
-            f.write(f"Degraded vs Original (masked regions only):\n")
+            f.write(f"Corrected vs Original (masked regions only):\n")
             f.write(f"  Mean: {mean_degraded:.3f} ({mean_degraded*100:.1f}%)\n")
             f.write(f"  Std:  {std_degraded:.3f} ({std_degraded*100:.1f}%)\n")
             f.write(f"  Min:  {min_degraded:.3f} ({min_degraded*100:.1f}%)\n")
             f.write(f"  Max:  {max_degraded:.3f} ({max_degraded*100:.1f}%)\n\n")
             
-            f.write(f"Corrected vs Original (masked regions only):\n")
+            f.write(f"Degraded vs Original (masked regions only):\n")
             f.write(f"  Mean: {mean_corrected:.3f} ({mean_corrected*100:.1f}%)\n")
             f.write(f"  Std:  {std_corrected:.3f} ({std_corrected*100:.1f}%)\n")
             f.write(f"  Min:  {min_corrected:.3f} ({min_corrected*100:.1f}%)\n")
