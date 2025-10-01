@@ -473,10 +473,10 @@ def main():
             f.write(f"  Max:  {max_corrected:.3f} ({max_corrected*100:.1f}%)\n\n")
             
             f.write(f"Improvement (Corrected - Degraded):\n")
-            f.write(f"  Mean: {mean_improvement:+.3f} ({mean_improvement*100:+.1f}%)\n")
-            f.write(f"  Std:  {std_improvement:.3f} ({std_improvement*100:.1f}%)\n")
-            f.write(f"  Min:  {min_improvement:+.3f} ({min_improvement*100:+.1f}%)\n")
-            f.write(f"  Max:  {max_improvement:+.3f} ({max_improvement*100:+.1f}%)\n\n")
+            f.write(f"  Mean: {mean_improvement:+.3f} ({(-1)*mean_improvement*100:+.1f}%)\n")
+            f.write(f"  Std:  {std_improvement:.3f} ({(-1)*std_improvement*100:.1f}%)\n")
+            f.write(f"  Min:  {min_improvement:+.3f} ({(-1)*min_improvement*100:+.1f}%)\n")
+            f.write(f"  Max:  {max_improvement:+.3f} ({(-1)*max_improvement*100:+.1f}%)\n\n")
             
             f.write(f"Individual values (masked regions only):\n")
             f.write(f"Item\t\tDegraded\tCorrected\tImprovement\n")
