@@ -207,8 +207,8 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
     sim_corrected = compute_masked_similarity(on_model_path, corrected_path, mask_path, grid_size)
     sim_degraded = compute_masked_similarity(on_model_path, degraded_path, mask_path, grid_size)
     
-    sim_corrected_pct = sim_degraded * 100
-    sim_degraded_pct = sim_corrected * 100
+    sim_corrected_pct = sim_corrected * 100
+    sim_degraded_pct = sim_degraded * 100
     
     # Create matplotlib figure
     fig, axes = plt.subplots(2, 2, figsize=(10, 10))
@@ -248,7 +248,7 @@ def create_labeled_comparison(item_dir: Path, grid_size: int = 256, font_size: i
         ax.add_patch(rect)
     
     # Add similarity information at the bottom
-    fig.text(0.5, 0.05, f'Corrected vs Original: {sim_corrected_pct:.1f}% | Degraded vs Original: {sim_degraded_pct:.1f}%', 
+    fig.text(0.5, 0.05, f'Degraded vs Original: {sim_degraded_pct:.1f}% | Corrected vs Original: {sim_corrected_pct:.1f}%', 
              ha='center', va='bottom', fontsize=font_size+1, fontweight='bold',
              bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8))
     
@@ -404,7 +404,7 @@ def main():
     improvement_values = []
     
     for item_dir in tqdm(item_dirs, desc="Creating visualizations"):
-        success, sim_corrected, sim_degraded = process_item(item_dir, output_dir, args.grid_size, args.font_size)
+        success, sim_degraded, sim_corrected = process_item(item_dir, output_dir, args.grid_size, args.font_size)
         if success:
             successful += 1
             sim_corrected_values.append(sim_corrected)
@@ -437,13 +437,13 @@ def main():
         min_improvement = np.min(improvement_values)
         max_improvement = np.max(improvement_values)
         
-        logger.info(f"Masked Similarity Statistics (Corrected vs Original):")
+        logger.info(f"Masked Similarity Statistics (Degraded vs Original):")
         logger.info(f"  Mean: {mean_degraded:.3f} ({mean_degraded*100:.1f}%)")
         logger.info(f"  Std:  {std_degraded:.3f} ({std_degraded*100:.1f}%)")
         logger.info(f"  Min:  {min_degraded:.3f} ({min_degraded*100:.1f}%)")
         logger.info(f"  Max:  {max_degraded:.3f} ({max_degraded*100:.1f}%)")
         
-        logger.info(f"Masked Similarity Statistics (Degraded vs Original):")
+        logger.info(f"Masked Similarity Statistics (Corrected vs Original):")
         logger.info(f"  Mean: {mean_corrected:.3f} ({mean_corrected*100:.1f}%)")
         logger.info(f"  Std:  {std_corrected:.3f} ({std_corrected*100:.1f}%)")
         logger.info(f"  Min:  {min_corrected:.3f} ({min_corrected*100:.1f}%)")
@@ -460,13 +460,13 @@ def main():
         with open(stats_path, 'w') as f:
             f.write(f"Masked Similarity Statistics for {len(sim_corrected_values)} items:\n\n")
             
-            f.write(f"Corrected vs Original (masked regions only):\n")
+            f.write(f"Degraded vs Original (masked regions only):\n")
             f.write(f"  Mean: {mean_degraded:.3f} ({mean_degraded*100:.1f}%)\n")
             f.write(f"  Std:  {std_degraded:.3f} ({std_degraded*100:.1f}%)\n")
             f.write(f"  Min:  {min_degraded:.3f} ({min_degraded*100:.1f}%)\n")
             f.write(f"  Max:  {max_degraded:.3f} ({max_degraded*100:.1f}%)\n\n")
             
-            f.write(f"Degraded vs Original (masked regions only):\n")
+            f.write(f"Corrected vs Original (masked regions only):\n")
             f.write(f"  Mean: {mean_corrected:.3f} ({mean_corrected*100:.1f}%)\n")
             f.write(f"  Std:  {std_corrected:.3f} ({std_corrected*100:.1f}%)\n")
             f.write(f"  Min:  {min_corrected:.3f} ({min_corrected*100:.1f}%)\n")
@@ -479,9 +479,9 @@ def main():
             f.write(f"  Max:  {max_improvement:+.3f} ({max_improvement*100:+.1f}%)\n\n")
             
             f.write(f"Individual values (masked regions only):\n")
-            f.write(f"Item\t\tCorrected\tDegraded\tImprovement\n")
+            f.write(f"Item\t\tDegraded\tCorrected\tImprovement\n")
             f.write(f"{'='*60}\n")
-            for i, (item_dir, sim_c, sim_d, imp) in enumerate(zip(item_dirs[:len(sim_corrected_values)], sim_degraded_values, sim_corrected_values, improvement_values)):
+            for i, (item_dir, sim_c, sim_d, imp) in enumerate(zip(item_dirs[:len(sim_corrected_values)], sim_corrected_values, sim_degraded_values, improvement_values)):
                 f.write(f"{item_dir.name}\t{sim_c:.3f} ({sim_c*100:.1f}%)\t{sim_d:.3f} ({sim_d*100:.1f}%)\t{imp:+.3f} ({imp*100:+.1f}%)\n")
         
         logger.info(f"Masked similarity statistics saved to: {stats_path}")
