@@ -13,7 +13,43 @@ from tqdm import tqdm
 sys.path.append(str(Path(__file__).parent.parent))
 
 from data import load_image, load_mask, apply_light_degradation
+from skimage import color
 from utils import setup_logging
+
+
+def apply_color_degradation(image: np.ndarray, mask: np.ndarray, magnitude: float = 0.15, seed: int = 42) -> np.ndarray:
+    """
+    Apply color degradation by modifying only the H (Hue) channel in HSV space.
+    Only affects the masked region.
+    
+    Args:
+        image: Input RGB image (0-1 range)
+        mask: Binary mask (0-1 range)
+        magnitude: Degradation magnitude (0-1)
+        seed: Random seed for reproducibility
+        
+    Returns:
+        Degraded RGB image (0-1 range)
+    """
+    np.random.seed(seed)
+    
+    # Convert to HSV
+    hsv = color.rgb2hsv(image)
+    
+    # Create mask boolean
+    mask_bool = mask > 0.5
+    
+    # Apply hue shift only in masked region
+    h_shift = np.random.uniform(-magnitude, magnitude)  # ±magnitude in [0,1] range
+    
+    # Apply shift to H channel only in masked region
+    hsv_degraded = hsv.copy()
+    hsv_degraded[mask_bool, 0] = np.clip(hsv_degraded[mask_bool, 0] + h_shift, 0, 1)
+    
+    # Convert back to RGB
+    degraded = color.hsv2rgb(hsv_degraded)
+    
+    return degraded
 
 
 def parse_args():
@@ -22,6 +58,7 @@ def parse_args():
     parser.add_argument("--mode", type=str, default="mixed", choices=["hsv", "hsl", "lab", "rgb", "mixed"], 
                        help="Degradation mode (default: mixed to match training)")
     parser.add_argument("--magnitude", type=float, default=0.15, help="Degradation magnitude (default: 0.15 to match training)")
+    parser.add_argument("--color", action="store_true", help="Only degrade color (H channel in HSV) in masked region")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility")
     parser.add_argument("--skip_if_exists", action="store_true", 
                        help="Skip items that already have degraded images")
@@ -50,6 +87,7 @@ def process_item(
     item_dir: Path,
     mode: str,
     magnitude: float,
+    color_only: bool,
     seed: int,
     skip_if_exists: bool,
     output_size: int,
@@ -84,13 +122,21 @@ def process_item(
         onmodel_img = load_image(onmodel_path)
         mask = load_mask(mask_path, (onmodel_img.shape[1], onmodel_img.shape[0]))
         
-        # Apply degradation with same parameters as training
-        degraded_img = apply_light_degradation(
-            onmodel_img, mask, mode=mode, magnitude=magnitude, seed=seed
-        )
+        # Apply degradation
+        if color_only:
+            # Only degrade color (H channel in HSV) in masked region
+            degraded_img = apply_color_degradation(
+                onmodel_img, mask, magnitude=magnitude, seed=seed
+            )
+        else:
+            # Apply degradation with same parameters as training
+            degraded_img = apply_light_degradation(
+                onmodel_img, mask, mode=mode, magnitude=magnitude, seed=seed
+            )
         
         # Debug: Print degradation info
-        print(f"🎨 Applied {mode} degradation:")
+        degradation_type = "color-only (H channel)" if color_only else mode
+        print(f"🎨 Applied {degradation_type} degradation:")
         print(f"   Magnitude: {magnitude}")
         print(f"   Seed: {seed}")
         print(f"   Mask coverage: {np.mean(mask)*100:.1f}%")
@@ -146,7 +192,7 @@ def main():
     success_count = 0
     for item_dir in tqdm(item_dirs, desc="Processing items"):
         if process_item(
-            item_dir, args.mode, args.magnitude, args.seed,
+            item_dir, args.mode, args.magnitude, args.color, args.seed,
             args.skip_if_exists, args.output_size, output_dir
         ):
             success_count += 1
